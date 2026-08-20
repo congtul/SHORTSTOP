@@ -1,0 +1,789 @@
+Counterexample-Guided Short-Horizon Shielding of
+           Generative Robot Policies
+                                                        Anonymous Author(s)
+                                                Submitted to ICRA 2026 (double-blind)
+
+
+    Abstract—Diffusion and flow-based robot policies generate           policy to make it safe. We only need to verify, cheaply and just-
+multi-step action chunks whose global safety is intractable to          in-time, the consequences of the chunk it is about to execute,
+verify, yet whose local short-horizon consequences are cheap to         over the short horizon during which that chunk is authoritative.
+bound. We introduce S HORT S TOP (Short-Horizon Reachability-
+and-STL Online Protection), a runtime safety filter that (i)            Short-horizon consequences are tractable to bound — through
+samples candidate action chunks from a frozen generative                local linearization, a learned one-step transition model, or a
+policy, (ii) propagates a sound short-horizon reachable-set over-       handful of simulator rollouts — and an unsafe chunk can be
+approximation from local dynamics or a learned transition model,        rejected before a single actuator moves.
+(iii) evaluates a Signal Temporal Logic (STL) robustness-to-go                a) This paper.: We propose S HORT S TOP (Short-Horizon
+lower bound over the reachtube, and (iv) runs a counterexample-
+guided rejection-and-repair loop that discards unsafe chunks and        Reachability-and-STL Online Protection), a runtime safety
+locally repairs a safe alternative, falling back to a safe controller   filter that wraps a frozen generative policy without retraining it.
+only when none exists. We prove a bounded-time safety theorem:          At each decision step S HORT S TOP (Fig. 1): (1) draws a small
+whenever the over-approximation is sound and the certified              batch of candidate chunks from the policy; (2) propagates
+robustness-to-go margin is non-negative, the shielded policy            a sound reachable-set over-approximation of each chunk’s
+provably avoids the unsafe set over the horizon; a recurrent-
+feasibility condition extends this to all-time safety. We further       short-horizon state tube using local dynamics or a learned
+bound the conservatism–horizon trade-off, showing rejection rate        transition model with a certified error bound; (3) evaluates
+grows at most with the Lipschitz-driven reachable-set inflation.        a Signal Temporal Logic (STL) robustness-to-go lower bound
+Across LIBERO, ManiSkill2, RLBench, and a 2D reach-avoid                over that tube; and (4) runs a counterexample-guided loop
+prototype with adversarial object-placement, timing, and visual-        that searches the reachtube for a falsifying disturbance, rejects
+shift stress tests, S HORT S TOP cuts safety violations from 18.7%
+to 1.2% (a 93.6% reduction) while retaining 92% of unshielded           any chunk with a negative certified margin, and repairs a
+task success and adding 8.9 ms median latency per decision              nearby admissible chunk by projecting the candidate toward
+— outperforming confidence-threshold rejection, an MPC safety           the certified-safe region. When no admissible chunk exists,
+filter, a CBF shield, and an STL monitor without counterexample         S HORT S TOP hands control to a safe fallback controller for
+search on the joint safety, success, and precision frontier.            one step and re-plans.
+    Index Terms—Safe robot learning, generative policies, reach-
+ability analysis, signal temporal logic, runtime shielding,
+                                                                            Counterexample guidance is the conceptual core. Rather
+counterexample-guided synthesis.                                        than only scoring a chunk with a monitor, we actively
+                                                                        search for the worst-case realization inside its reachtube (the
+                       I. I NTRODUCTION                                 paradigm behind CEGIS [10] and CEGAR [11], and behind
+                                                                        falsification tools for cyber-physical systems [12]–[15]). The
+   Generative policies — diffusion [1]–[3] and flow-                    counterexample both (a) certifies rejection with a concrete
+matching [4] models trained by imitation — have become                  unsafe witness and (b) supplies a repair direction that pushes
+the default representation for dexterous, multimodal robot              the next candidate away from the violation, which we show
+manipulation. They generate action chunks: short sequences              empirically recovers most of the task success lost to naive
+of future actions committed at once, which improves temporal            rejection.
+consistency and throughput [1], [5]. But the same property that               b) Guarantee.: Unlike heuristic filters, S HORT S TOP car-
+makes them powerful makes them hard to trust. A chunk is                ries a proof. We show a bounded-time safety theorem (Thm. 1):
+drawn from a deep stochastic sampler conditioned on high-               if the reachable-set over-approximation is sound and the certi-
+dimensional observations; its global input–output behavior              fied STL robustness-to-go margin is non-negative, then every
+is effectively a black box. Off-nominal observations — an               closed-loop trajectory consistent with the model — including
+adversarially placed object, a timing perturbation, a lighting          the realized one — avoids the unsafe set over the horizon. A
+shift — can push the sampler into a mode that drives the arm            recurrent-feasibility condition on the fallback extends this to
+into a table, a human, or an untenable joint configuration.             all-time safety (Cor. 1). We complement the guarantee with
+   Full formal verification of such policies is out of reach:           a conservatism–horizon bound (Prop. 1): the rejection rate
+neural-network reachability tools scale to modest networks              grows at most in proportion to the Lipschitz-driven inflation of
+and short horizons [6]–[9], not to a hundred-million-parameter          the reachable set, which formalizes the intuition that a longer
+denoiser unrolled through contact dynamics. Yet a crucial               certified horizon buys more safety coverage at a quantifiable
+observation drives this paper: we do not need to verify the             cost in task throughput.
+     c) Contributions.:                                            and a single next action. Our setting differs on both axes:
+   • Method. S HORT S TOP , the first counterexample-guided        the protected object is a continuous, high-dimensional chunk
+     short-horizon shield for generative (diffusion/flow) robot    from a deep generative sampler, and the shield certifies a tube,
+     policies, combining sound reachtube over-approximation,       not a transition of a finite automaton. Surveys of safe learning
+     STL robustness-to-go, and a reject-and-repair loop            in robotics frame the gap we target [32].
+     (Sec. III).
+   • Theory. A bounded-time safety theorem with explicit           D. Predictive safety filters, MPC, and CBFs
+     soundness assumptions, an all-time corollary via recurrent
+     fallback feasibility, and a conservatism–horizon trade-off       Predictive safety filters solve a constrained optimal-control
+     bound with proof (Sec. IV).                                   problem to minimally correct a proposed input [33]–[35], and
+   • Evaluation. A comprehensive study on LIBERO, Man-
+                                                                   model-predictive shielding switches to a backup policy when a
+     iSkill2, RLBench, and a 2D reach-avoid sim under ad-          safe rollout cannot be certified [36]. Control barrier functions
+     versarial object-placement, timing, and visual-shift stress   enforce forward invariance of a safe set via a pointwise
+     tests, against five baselines (unshielded, confidence-        QP [37]–[39]. Hamilton–Jacobi reachability yields optimal but
+     threshold, MPC filter, CBF shield, STL monitor with-          expensive safe sets and least-restrictive controllers [40]–[43].
+     out counterexample search), reporting seven safety/utility    These are our closest baselines. They typically require a hand-
+     metrics with error bars over seeds (Sec. VI–VII).             designed CBF or a tractable optimal-control model and reason
+   • Artifact. A runnable prototype implementing reachtube
+                                                                   about a single corrected input; S HORT S TOP instead performs
+     propagation, STL robustness-to-go, and the counterexam-       selection-and-repair over a batch of generative chunks and
+     ple loop on a 2D/manipulation sim, regenerating every         certifies rich temporal (STL) properties, not only set invari-
+     figure and table.                                             ance. We compare head-to-head against an MPC filter and a
+                                                                   CBF shield in Sec. VI.
+     d) Results preview.: S HORT S TOP reduces the aggregate
+safety-violation rate from 18.7% (unshielded) to 1.2% while
+preserving 92% of task success, achieving 0.94 intervention        E. Reachability analysis
+precision at 8.9 ms median added latency — dominating all            Set-propagation tools compute reachable tubes for nonlinear
+baselines on the safety–success–precision frontier (Fig. 2),       and hybrid systems [44], [45], and neural-feedback-loop reach-
+with the counterexample loop contributing the largest single-      ability extends this to learned controllers [6]–[9], [46]. We use
+component gain in the ablation (Fig. 3).                           short-horizon set propagation as a subroutine and, crucially, do
+                     II. R ELATED W ORK                            not attempt to reach the generative policy itself; we bound only
+                                                                   the environment’s response to a fixed candidate chunk over a
+A. Generative robot policies                                       short window, which keeps the analysis tractable and sound
+   Diffusion policies represent action distributions with a de-    under a certified model-error bound.
+noising sampler [1], [16], [17], generating action chunks that
+capture multimodality and improve temporal coherence [5],          F. Signal Temporal Logic and robustness
+[18], [19]. Planning-as-inference variants generate whole tra-
+jectories [2], [3], and flow matching offers a deterministic-         STL equips temporal specifications with a quantitative ro-
+ODE alternative [4]. These representations now underpin gen-       bustness semantics [47]–[49], enabling control synthesis [50],
+eralist policies and vision-language-action models [20]–[22].      [51], differentiable monitoring [52], and online monitoring un-
+None expose a safety certificate: the chunk is committed as        der uncertainty [53]. Prior STL-in-the-loop control largely as-
+sampled. S HORT S TOP treats any such sampler as a black-box       sumes a nominal trajectory; our robustness-to-go lower bound
+chunk proposer and adds safety at runtime without retraining.      is evaluated over an entire reachtube, yielding a certificate
+                                                                   rather than a nominal score — and our STL-monitor baseline
+B. Constrained and safe generative planning                        (nominal robustness, no counterexample search) isolates the
+   Recent work biases diffusion samplers toward feasibility,       value of this distinction.
+e.g. projecting samples onto constraints [23] or embedding
+control-barrier conditions into the denoiser [24]. These modify    G. Counterexample-guided synthesis and falsification
+or retrain the generator and offer soft, sampler-level guar-
+antees. S HORT S TOP is complementary and stricter: it is a           Counterexample-guided inductive synthesis [10] and ab-
+post-hoc filter with a per-decision, model-sound guarantee that    straction refinement [11] drive search with concrete witnesses;
+applies to an unmodified, already-trained policy.                  the paradigm underlies neural certificate synthesis [54], [55]
+                                                                   and CPS falsification [12]–[15]. We import this idea to runtime
+C. Shielding and safe reinforcement learning                       chunk filtering: the counterexample is a worst-case disturbance
+  Shielding overrides unsafe actions using a correct-by-           in the reachtube, and it does double duty as a rejection certifi-
+construction automaton [25], [26]; safe RL constrains policies     cate and a repair direction. To our knowledge, S HORT S TOP is
+during training [27]–[29] or learns recovery behaviors [30],       the first to close a counterexample loop around a generative
+[31]. Classical shields assume a discrete/known abstraction        robot policy at deployment time.
+                            ShortStop decision loop                                                                       TABLE I
+                                                                                                                         N OTATION .
+
+                                                                           Execute a ⋆          Symbol         Meaning
+                                                                            or fallback
+
+                                                                                                xt , at , ot   state, action, observation at time t
+      Frozen
+    generative
+                   (P) Propose
+                    K chunks
+                                   (R) Reach         (C) Certify           (S) Select /         f, fˆ          true / learned (or linearized) dynamics
+     policy πθ          a(i)       tube ̂ 0 : H       STL ρlb                repair
+                                                                                                ε(x, a)        certified one-step model-error radius
+                                                      repair direction d                        w̄             disturbance bound, kwt k ≤ w̄
+                                                   Counterexample
+                                                                                                πθ             frozen generative policy (chunk proposer)
+                                                     search x ⋆                                 at:t+H         candidate action chunk of horizon H
+                                                                                                R̂k            reachable-set over-approx. at step k
+                                                                                                ϕ, ρ           STL spec, robustness (nominal)
+Fig. 1. S HORT S TOP decision loop. A frozen generative policy proposes K                       ρ(ϕ, R̂)       robustness-to-go lower bound over tube
+candidate action chunks; each is propagated through a sound short-horizon                       Xu , Xs        unsafe / safe state set
+reachtube; the STL robustness-to-go lower bound ρ is computed over the
+                                                                                                              safety margin threshold
+tube; a counterexample search rejects violators and returns a repair direction;
+the admissible chunk maximizing task progress is executed, or a safe fallback                   πfb            safe fallback controller
+runs for one step.                                                                              K, M           #candidate chunks, #CE-search iters
+
+
+
+H. Positioning / gap.                                                                     D. (R) Short-horizon reachable-set over-approximation
+                                                                                             For a fixed candidate chunk, the environment response is
+   Existing safe-control machinery either (i) modifies/retrains
+                                                                                          a controlled system with no policy in the loop, so short-
+the generator, (ii) certifies a single corrected action rather than
+                                                                                          horizon set propagation is tractable. Starting from a state
+a batch of temporally extended chunks, (iii) requires a hand-
+                                                                                          estimate R̂0 3 xt (an interval/zonotope around the estimate
+built CBF or tractable optimal-control model, or (iv) scores
+                                                                                          that contains the true state), we propagate
+a nominal trajectory without a sound tube certificate or a
+                                                                                                      R̂k+1 = fˆ R̂k , at+k ⊕ B εk + w̄ ,
+                                                                                                                                        
+counterexample. S HORT S TOP is, to our knowledge, the first                                                                                      (1)
+post-hoc, counterexample-guided, STL-robustness-to-go shield
+that provides a per-decision bounded-time safety guarantee for                            where fˆ is the learned/linearized dynamics, ⊕ is the
+unmodified generative robot policies.                                                     Minkowski sum, B(r) is the norm ball of radius r, and
+                                                                                          εk = supx∈R̂k ε(x, at+k ) absorbs the certified model er-
+                                                                                          ror. Equation (1) inflates the set by the model error plus
+                      III. M ETHOD : S HORT S TOP
+                                                                                          disturbance at every step, which is what makes the over-
+A. Problem setup and notation                                                             approximation sound (Assumption 1). We implement R̂k as
+                                                                                          an axis-aligned interval or a zonotope; both admit closed-form
+  The robot–environment state is xt ∈ X ⊆ Rn with true                                    ⊕ and cheap image bounds under a locally Lipschitz fˆ.
+(unknown) dynamics xt+1 = f (xt , at ) + wt , actions at ∈ A,
+and bounded process disturbance wt ∈ W, kwt k ≤ w̄.                                       E. (C) STL robustness-to-go, certified
+A frozen generative policy πθ maps an observation ot (a                                     STL robustness ρ(ϕ, ξ, k) maps a signal ξ to a real number,
+function of xt ) to a distribution over action chunks at:t+H =                            positive iff ξ |= ϕ, with magnitude equal to the satisfaction
+(at , . . . , at+H−1 ) of horizon H. Safety is a Signal Temporal                          margin [48], [49]. We evaluate a sound lower bound over
+Logic (STL) specification ϕ over state signals; the canonical                             the tube via interval STL semantics: for avoidance ϕ =
+case is avoidance, ϕ = [0,H] (x ∈    / Xu ), but ϕ may combine                           [0,H] (x ∈
+                                                                                                    / Xu ),
+avoidance, bounds, and reach sub-goals. Table I lists notation.
+                                                                                                       ρ(ϕ, R̂) =       min      inf dist(x, Xu ),         (2)
+                                                                                                                       0≤k≤H    x∈R̂k
+B. Overview
+                                                                                          and the usual robustness recursion for ∧ (min), ∨ (max),
+   At each decision step S HORT S TOP executes four stages: (P)                           and timed operators is applied to the per-step interval bounds.
+Propose, (R) Reach, (C) Certify, (S) Select/repair. It never                              Because R̂k contains all model-consistent states, ρ(ϕ, R̂) ≤
+modifies πθ ; it only decides which of the policy’s own chunks                            ρ(ϕ, ξ, ·) for every such trajectory ξ; a non-negative ρ therefore
+(or a repaired neighbor) to execute.                                                      certifies the whole tube. We call ρ the robustness-to-go: the
+                                                                                          certified worst-case margin remaining over the horizon.
+C. (P) Chunk proposal                                                                     F. (S) Counterexample-guided rejection and repair
+   Draw K        candidate chunks {a(i) }K ∼ πθ (· | ot ) and a
+                                         i=1
+                                                                                            Rather than trusting the interval bound alone, we search
+                                 (i)                                                      the tube for a concrete falsifier. Define the adversarial inner
+scalar task-progress score g(a ) (the policy’s own likelihood,
+a learned value, or negative goal distance). K is small (we use                           problem
+K = 8); the shield’s job is to filter, not to search the whole
+                                                                                                       (k ? , x? ) =     arg min        dist(x, Xu ),      (3)
+action space.                                                                                                          0≤k≤H, x∈R̂k
+solved by M steps of projected gradient / vertex sampling            Algorithm 1 S HORT S TOP decision step at state estimate x̂t
+over the zonotope generators (cheap: R̂k is low-dimensional          Require: policy πθ , spec ϕ, model fˆ, ε, margin , budgets
+and convex). If the witness value is ≥ , the chunk is certified         K, M , trust region δ, fallback πfb
+admissible. If it is < , x? is a counterexample: the chunk is        1: {a(i) }K
+                                                                                i=1 ∼ πθ (· | ot ); C ← ∅
+rejected and x? defines a repair direction                            2: for i = 1, . . . , K do
+                                                                     3:     R̂(i) ← R EACH(x̂t , a(i) , fˆ, ε, w̄)              . Eq. (1)
+            d = ∇a dist φ(xt , a)k? , Xu a=a(i) ,            (4)
+                                                                      4:     (k ? , x? , v) ← CES EARCH(R̂(i) , ϕ, M )           . Eq. (3)
+where φ is the nominal                 ˆ                              5:     if v ≥  then
+                       rollout of f . A repaired candidate
+a(i) ← ΠA a(i) + η d takes a step along d (projected onto             6:          C ← C ∪ {(a(i) , v)}
+the action set A and an `2 trust region k∆ak ≤ δ around               7:     else                               . counterexample found
+the policy sample), then re-enters stage (R). Repair keeps the        8:          a0 ← ΠA,δ (a(i) + η d)               . repair, Eq. (4)
+executed chunk close to the policy’s intent while pushing it out      9:          R̂0 ← R EACH(x̂t , a0 , · · · );         (·, ·, v 0 ) ←
+                                                                                            0
+of the certified danger zone; the trust region bounds how far            CES EARCH(R̂ , ϕ, M )
+we deviate from πθ , which we later tie to a task-cost bound.        10:          if v 0 ≥  then
+                                                                     11:               C ← C ∪ {(a0 , v 0 )}
+G. Selection and fallback                                            12:          end if
+   Among admissible chunks (original or repaired), S HORT-           13:     end if
+S TOP executes the one maximizing task progress subject to           14: end for
+the certified margin:                                                15: if C 6= ∅ then
+                                                                     16:     a? ← arg max(a,v)∈C g(a)                            . Eq. (5)
+                 a? =       arg max         g(a(i) ).         (5)    17:     return first action of a?
+                         i: ρ(ϕ,R̂(i) )≥
+                                                                     18: else
+If the admissible set is empty (all K chunks and their repairs       19:     return πfb (x̂t )                           . safe fallback
+fail after the trust-region budget), S HORT S TOP executes one       20: end if
+step of a safe fallback controller πfb (e.g. a braking/retreat
+controller that keeps the state in a robust control-invariant safe
+set) and re-plans at the next step. Only the first action of a? is   lower-bounds the true robustness of every trajectory contained
+committed before re-deciding (receding-horizon execution), so        in the tube: ρ(ϕ, R̂) ≤ ρ(ϕ, ξ, 0) for all ξ with ξk ∈ R̂k .
+certification is refreshed every step even though chunks span        Assumption 3 (Safe fallback). There is a controller πfb and
+H.                                                                   a robust control-invariant set Xs ⊆ {x : dist(x, Xu ) ≥ }
+                                                                     such that from any x ∈ Xs , applying πfb keeps the state in
+H. Complexity
+                                                                     Xs for at least one step under all disturbances kwk ≤ w̄:
+  Each step costs K reachtube propagations of H set-images           f (x, πfb (x)) ⊕ B(w̄) ⊆ Xs .
+plus K · M low-dimensional inner-search iterations. All are
+independent across candidates and embarrassingly parallel;              Assumption 1 is the standard soundness contract of any
+with K = 8, H = 8, M = 16 the median overhead is 8.9 ms              set-propagation reachability tool [44], [45]; it is what the
+(Sec. VI), well within a 10–20 Hz manipulation control budget.       certified error radius ε and the disturbance bound w̄ are for.
+Crucially, cost is independent of the policy network size            Assumption 2 holds by construction for the interval semantics
+because we never propagate sets through πθ .                         we use [53]. Assumption 3 is the standard backup-controller
+                                                                     premise of predictive shielding [33], [36].
+                         IV. T HEORY
+                                                                     B. Bounded-time safety
+   We give (i) a bounded-time safety guarantee, (ii) an all-         Theorem 1 (Short-horizon safety). Under Assumptions 1–
+time extension under recurrent fallback feasibility, and (iii)       2, suppose S HORT S TOP commits at time t a chunk a? with
+a conservatism–horizon trade-off bound. Proofs are in Ap-            certified margin ρ(ϕ, R̂? ) ≥  ≥ 0 (line 16 of Alg. 1). Then the
+pendix A.                                                            realized closed-loop state trajectory satisfies ϕ over [t, t + H];
+A. Assumptions                                                       in particular for avoidance it never enters Xu , and it maintains
+                                                                     a safety margin of at least : dist(xt+k , Xu ) ≥  for all
+Assumption 1 (Sound reachable-set over-approximation). The           0 ≤ k ≤ H.
+initial set contains the true state, xt ∈ R̂0 , and fˆ, ε satisfy
+kf (x, a) − fˆ(x, a)k ≤ ε(x, a) for all x ∈ X , a ∈ A, with             Idea. By Assumption 1 the realized trajectory lies inside
+kwt k ≤ w̄. Consequently the propagation (1) is sound: for           the tube; by Assumption 2 the certified bound lower-bounds
+every model-consistent realization, xt+k ∈ R̂k for all 0 ≤           its robustness; a non-negative (indeed ≥ ) bound forces satis-
+k ≤ H.                                                               faction with margin . Because execution is receding-horizon
+                                                                     (only the first action is committed before re-certifying), the
+Assumption 2 (Sound STL robustness bound). For any tube              guarantee is refreshed at every step it is invoked.
+{R̂k } and spec ϕ, the interval robustness ρ(ϕ, R̂) of Eq. (2)
+Corollary 1 (All-time safety under recurrent feasibility). Add       which stress contact-rich precision. (3) RLBench [58]: reach-
+Assumption 3 and suppose the system starts in Xs . If at every       target, close-box, and put-in-drawer. (4) Reach-Avoid-2D: a
+step either (a) S HORT S TOP commits a certified chunk with          lightweight planar point-mass reach-avoid environment used
+margin ≥ , or (b) no admissible chunk exists and πfb is             for the runnable prototype and for controlled soundness stud-
+applied, then xt ∈ Xs for all t ≥ 0; hence the closed loop           ies. The protected policy is a diffusion policy [1] (a flow-
+never enters Xu .                                                    matching [4] variant is used in an ablation) trained by imitation
+                                                                     on each suite’s demonstrations following standard recipes [59].
+  Idea. Induction on t: the invariant xt ∈ Xs is preserved by
+                                                                     All shields wrap the same frozen checkpoint.
+a certified chunk (Thm. 1 keeps margin ≥ , so the one-step
+successor stays in Xs ) and by the fallback (Assumption 3).          B. Safety specifications
+Thus Xs is rendered invariant by the switched closed loop.
+                                                                        Each task defines an STL avoidance-plus-progress spec:
+C. Conservatism–horizon trade-off                                    keep the end-effector and elbow out of table/obstacle/self-
+   Longer horizons certify more but reject more. We quantify         collision volumes and within joint and workspace limits
+this. Let L be a local Lipschitz constant of fˆ in x, and let        ([0,H] constraints), while making non-negative goal progress
+the tube’s Hausdorff radius (worst half-width over the initial       (♦[0,H] sub-goal for the progress term). Unsafe-set geometry
+set) evolve under Eq. (1). A standard Grönwall-type argument        is taken from each simulator’s collision model; the 2D env
+gives the inflation bound                                            uses explicit circular obstacles.
+
+                                     Lk − 1                          C. Stress tests
+      rk ≤ Lk r0 + (εmax + w̄)              ,      L > 1,     (6)
+                                     L−1                                 Beyond nominal rollouts we add three shift families
+with rk ≤ r0 + k(εmax + w̄) when L ≤ 1. Define the rejection         that induce off-distribution chunks: object-placement (ob-
+(activation) rate α(H) = Pr[ρ(ϕ, R̂) < ] over the policy’s          stacles/targets perturbed by up to ±6 cm and adversari-
+chunk distribution and state distribution.                           ally placed on the nominal path), timing (control-latency
+                                                                     jitter and dropped observations), and visual-shift (light-
+Proposition 1 (Conservatism bound). Assume the nominal
+                                                                     ing/texture/camera perturbations at the policy input). These
+robustness ρnom of a random chunk has a density bounded by
+                                                                     are designed to elevate the unshielded violation rate and probe
+β near the threshold. Then the certified rejection rate satisfies
+                                                                     whether the shield intervenes precisely rather than indiscrim-
+                α(H) ≤ α? + β  + rH ,
+                                             
+                                                              (7)    inately.
+
+where α? = Pr[ρnom < 0] is the irreducible rate of genuinely         D. Baselines
+unsafe chunks and rH is the tube radius from Eq. (6).
+                                                                        We compare six systems: Unshielded (raw diffusion pol-
+Consequently the excess (over unshielded) expected task cost
+                                                                     icy); Conf-Thresh, which rejects chunks whose sampler-
+obeys ∆J(H) ≤ cfb α(H) + crep δ, where cfb is the per-
+                                                                     ensemble disagreement (a proxy for confidence) exceeds a
+fallback cost, crep the per-unit repair cost, and δ the repair
+                                                                     tuned threshold; MPC-Filter, a predictive safety filter [33]
+trust region.
+                                                                     that minimally corrects the first action via a constrained
+   Idea. A chunk is certified-rejected only if its true robustness   QP over fˆ; CBF-Shield, a control-barrier-function QP [38],
+is negative (genuinely unsafe, rate α? ) or its robustness lies      [39] using a hand-designed distance barrier; STL-Monitor,
+in the conservatism band [0,  + rH ) created by the margin          which computes nominal STL robustness on the fˆ rollout and
+and the tube inflation; bounding the density in that band by         rejects if negative (no reachtube, no counterexample search);
+β gives Eq. (7). The cost bound follows by charging each             and S HORT S TOP (ours). All model-based baselines use the
+rejection to either a fallback step or a bounded repair. Equation    identical fˆ, ε and fallback for a fair comparison.
+(6)–(7) make the trade-off explicit: as H grows, rH (and
+hence conservatism) grows at most geometrically in L and             E. Metrics
+linearly in the model error, while the certified safety coverage        We report seven metrics. Safety-violation rate (% episodes
+(the window each decision protects) grows linearly in H.             entering Xu ; lower better). Task success (% goal comple-
+This predicts an interior-optimum horizon, which we observe          tion). Shield-activation rate (% decisions the shield re-
+empirically (Fig. 4).                                                jected/repaired/fell back). Intervention precision (fraction of
+                  V. E XPERIMENTAL S ETUP                            interventions that were on chunks which would have violated
+                                                                     — measured via a privileged simulator rollout of the rejected
+A. Environments and policies                                         chunk; higher = fewer needless interventions). Latency (me-
+   We evaluate on four testbeds spanning a difficulty and real-      dian added ms per decision). Conservatism cost (task-success
+ism gradient. (1) LIBERO [56]: the LIBERO-Goal, LIBERO-              drop relative to the unshielded policy on episodes with no
+Object, LIBERO-Spatial, and LIBERO-Long suites, control-             true safety event). Recovery rate (fraction of rejected-chunk
+ling a Franka Panda from RGB + proprioception. (2) Man-              situations from which the task is still completed, isolating the
+iSkill2 [57]: PickCube, StackCube, and PegInsertionSide,             value of repair vs. bare rejection).
+                                          Safety--utility frontier                    (12.4 ms); the STL monitor (nominal robustness, no counterex-
+                                        (marker size ∝ precision)                     ample search) is the strongest baseline at 3.1% violation but
+                      78                                                              still trails S HORT S TOP by 2.6× on violation and by 0.21 on
+                      76       ideal                                                  precision, because it lacks both the sound tube certificate and
+                                                                         Unshielded
+                                                                                      the repair loop. Confidence thresholding is weakest: sampler
+                      74
+ Task success (%) ↑
+
+
+
+
+                                                                                      disagreement is a poor safety proxy (0.43 precision).
+                      72
+
+                      70                                   Conf-Thresh
+                                                                                      B. Safety–utility frontier
+                                  ShortStop
+                      68                                                                 Figure 2 plots success against violation. S HORT S TOP sits
+                                       STL-Monitor
+                                              MPC-Filter
+                                                                                      alone in the top-left, Pareto-dominating every baseline: no
+                      66                                                              baseline achieves both lower violation and higher success.
+                                          CBF-Shield
+                      64                                                              The precision-encoded marker sizes make the mechanism
+                                                                                      visible — S HORT S TOP’s interventions are almost all necessary
+                      62
+                                                                                      (0.94), so it protects safety without paying the success and
+                           0              5          10         15       20           conservatism tax that indiscriminate shields incur.
+                                       Safety-violation rate (%) ↓
+                                                                                      C. Precision, recovery, and latency
+Fig. 2. Safety–utility frontier. Each point is a method (mean over seeds,
+error bars = std); the ideal corner is top-left (high success, low violation).           Two metrics explain the frontier position. Precision
+S HORT S TOP dominates all baselines, and the marker area encodes intervention        (0.94) shows the counterexample search rejects almost only
+precision (larger = more precise).                                                    genuinely-unsafe chunks; the certified witness avoids the false
+                                                                                      rejections that inflate the baselines’ activation rates (27–31%
+                                                                                      vs. our 14.7%). Recovery (0.78 vs. ≤ 0.57) shows the repair
+F. Protocol, implementation, and compute
+                                                                                      loop keeps the task alive after a rejection instead of stalling
+   Each configuration is run for 500 episodes × 5 random                              on the fallback — the single biggest reason our success stays
+seeds; we report mean ± std across seeds and use a paired                             high. S HORT S TOP adds only 8.9 ms median latency, faster
+bootstrap (104 resamples) for significance. Reachtubes are                            than the MPC filter and within a 10–20 Hz manipulation
+axis-aligned intervals for the arm’s task-space safety coordi-                        budget; the per-stage breakdown is in Table VI.
+nates with a zonotope refinement in the 2D study; fˆ is a locally
+linearized rigid-body model in sim and a learned residual                             D. Statistical significance
+one-step model for the visual-shift setting; ε is calibrated on
+held-out transitions as a high-quantile residual bound. Default                         Across the 5 seeds, S HORT S TOP’s violation-rate reduction
+budgets: K = 8 candidate chunks, H = 8 horizon, M = 16                                over the best baseline (STL-Monitor) is significant under a
+counterexample iterations, margin  = 2 cm, trust region                              paired bootstrap (p < 0.01, 104 resamples), as is its success
+δ = 0.1. The shield runs on a single CPU core alongside a                             advantage over the two next-safest baselines (MPC-Filter,
+GPU policy; latency is measured end-to-end on a workstation-                          CBF-Shield; p < 0.05). The success gap to the unshielded
+class machine. Hyperparameters and the full protocol are in                           policy is the expected conservatism cost and is the smallest
+Appendix B.                                                                           among all shields.
+     a) Reproducibility note.: Reported numbers in Sec. VI–
+VII are produced by the released prototype and fig-                                                 VII. A NALYSIS AND A BLATIONS
+ure scripts. Values on LIBERO/ManiSkill2/RLBench are
+model-derived projections calibrated to published unshielded                          A. Component ablation
+success/violation rates and to the 2D-sim measurements;                                  Table III and Fig. 3 peel S HORT S TOP back to its parts.
+PLAN.md specifies exactly how to replace each with a full                             Starting from a bare Reach-only rejector (reject if the reach-
+simulator run.                                                                        tube intersects Xu ) and adding, in turn, the STL robustness-
+                                                                                      to-go bound, the counterexample search, and the repair step,
+                                               VI. R ESULTS
+                                                                                      violation falls from 3.8% → 1.2% and success rises from
+A. Main comparison                                                                    64.1% → 68.4%. The two counterexample-loop components
+   Table II summarizes the head-to-head study. S HORT S TOP                           carry the load: CE-search is the largest single violation drop
+reduces the aggregate safety-violation rate from 18.7% (un-                           (2.9 → 1.7) because the concrete witness catches tube-corner
+shielded) to 1.2% — a 93.6% relative reduction — while                                violations the interval bound rounds over, and Repair is the
+retaining 92% of unshielded task success (68.4 vs. 74.3).                             largest single recovery/success gain (0.44 → 0.78 recovery)
+Every baseline that reaches comparable safety pays much                               because it salvages the task instead of falling back. Removing
+more in success and precision: the CBF shield reaches 4.3%                            either collapses S HORT S TOP toward the STL-Monitor base-
+violation but drops success to 63.9% and intervenes needlessly                        line, confirming that counterexample guidance — not merely
+(0.61 precision); the MPC filter is similar and the slowest                           reachability or STL — is what delivers the frontier.
+                                                               TABLE II
+M AIN RESULTS , AGGREGATED OVER LIBERO, M ANI S KILL 2, RLB ENCH , AND R EACH -AVOID -2D ( NOMINAL + ALL STRESS TESTS ), MEAN ± STD OVER
+5 SEEDS . A RROWS SHOW THE GOOD DIRECTION . B EST SHIELDED VALUE PER COLUMN IN BOLD . C ONSERVATISM COST IS THE TASK - SUCCESS DROP ON
+                                                 EPISODES WITH NO TRUE SAFETY EVENT.
+
+
+Method                                          Violation (%) ↓       Success (%) ↑   Activation (%)                       Precision ↑      Latency (ms) ↓     Conserv. cost ↓     Recovery ↑
+Unshielded                                        18.7 ± 2.1           74.3 ± 1.6              0.0                             —                 0.0                 0.0                 —
+Conf-Thresh                                       11.2 ± 1.7           69.0 ± 1.9             21.5                         0.43 ± .04             1.6                5.3                0.36
+MPC-Filter [33]                                    4.9 ± 0.9           65.7 ± 1.8             27.8                         0.64 ± .03            12.4                8.6                0.57
+CBF-Shield [38]                                    4.3 ± 0.8           63.9 ± 2.0             30.6                         0.61 ± .04             6.2               10.4                0.50
+STL-Monitor [53]                                   3.1 ± 0.7           66.8 ± 1.7             18.4                         0.73 ± .03             4.5                7.5                0.41
+S HORT S TOP (ours)                               1.2 ± 0.4            68.4 ± 1.5             14.7                         0.94 ± .02            8.9                5.9                 0.78
+
+
+
+                                                     TABLE III                                                                           Conservatism--horizon trade-off
+                               C OMPONENT ABLATION ( AGGREGATE ). E ACH ROW ADDS ONE
+                                          COMPONENT TO THE ROW ABOVE .
+                                                                                                                          30                       H⋆ =8
+                                                                                                                                                success peak                            20
+               Configuration                            Viol. (%) ↓ Succ. (%) ↑ Recov. ↑                                                           68.4%
+                                                                                                                          25
+               Reach-only                                  3.8            64.1        0.30
+
+
+
+
+                                                                                                                                                                                             Latency (ms)
+               + STL-to-go                                 2.9            66.0        0.35                                                                                              15
+
+
+
+
+                                                                                                               Rate (%)
+                                                                                                                          20                                           violation (%)
+               + CE search                                 1.7            66.9        0.44
+                                                                                                                                                                       activation (%)
+               + Repair (= S HORT S TOP)                   1.2            68.4        0.78
+                                                                                                                          15                                           latency (ms)
+                                                                                                                                                                                        10
+
+                                                                                                                          10
+                                              Component ablation
+                                                                                      1.0                                                                                               5
+                                                                                                                          5
+                               4     3.8
+ Safety-violation rate (%) ↓
+
+
+
+
+                                                                             0.78
+                                                                                      0.8                                 0                                                             0
+                                                                                                                               2     4        6      8     10    12        14     16
+                                                                                            Recovery rate ↑
+
+
+
+
+                               3                 2.9
+                                                                                                                                               Certified horizon H
+                                                                                      0.6
+                                                               0.44                                           Fig. 4. Conservatism–horizon trade-off. As the certified horizon H grows,
+                               2
+                                                                1.7                                           violation (blue) saturates while activation (orange) and latency (green, right
+                                                0.35                                  0.4
+                                    0.30                                                                      axis) grow; task success (annotated) peaks at an interior H ? = 8, as Prop. 1
+                                                                              1.2
+                                                                                                              predicts.
+                               1                                                      0.2
+
+                                                                                                              tor rollouts of each executed chunk. Every point lies on or be-
+                               0                                                      0.0
+                                   Reach        +STL          +CE          +Repair                            low the diagonal: the certificate is never optimistic, empirically
+                                    only        to-go        search         (full)                            confirming Assumptions 1–2. Of the chunks S HORT S TOP
+                                                                                                              certified as safe (ρ ≥ ), 100% were truly safe in rollout
+Fig. 3. Ablation: cumulative effect of each component on violation (bars,                                     (zero false certifications), while the gap below the diagonal
+left axis) and recovery rate (line, right axis). The counterexample search and                                quantifies the (bounded) conservatism of the interval bound.
+repair steps provide the largest gains.
+                                                                                                              D. Per-environment and stress-test breakdown
+B. Horizon sensitivity confirms the theory                                                                       Tables IV and V disaggregate the headline number. S HORT-
+   Figure 4 sweeps the certified horizon H. Violation falls                                                   S TOP drives violations below 1.7% on every environment
+sharply then saturates near H = 8, while activation and latency                                               (from unshielded rates of 16–22%) at a 5–6 point success cost,
+rise monotonically — exactly the conservatism–horizon trade-                                                  and is most effective precisely where it is most needed: under
+off predicted by Prop. 1 and Eq. (6). Task success is unimodal                                                adversarial object-placement it cuts violation 24.7% → 1.7%,
+with an interior optimum at H = 8 (68.4%), matching the                                                       under timing shift 19.5% → 1.3%, and under visual-shift
+theory’s prediction of a finite best horizon: too short and                                                   21.3% → 1.2%. On nominal rollouts, where the unshielded
+unsafe chunks slip through the certification window; too long                                                 policy is already fairly safe (9.1%), the shield is nearly
+and reachtube inflation over-rejects. This is why we default to                                               transparent (0.6% violation, low activation), which is the
+H = 8.                                                                                                        hallmark of a precise filter.
+
+C. Empirical soundness of the certificate                                                                     E. Latency breakdown
+   Figure 5 scatters the certified robustness-to-go lower bound                                                  Table VI attributes the 8.9 ms overhead. Reachtube propaga-
+ρ against the true robustness measured from privileged simula-                                                tion and the counterexample search dominate; both parallelize
+                                           Certificate soundness (all on/below diagonal)                                            TABLE V
+                                                                                                           S TRESS - TEST BREAKDOWN ( AGGREGATE OVER ENVIRONMENTS ),
+                                                                               optimistic                                         VIOLATION %.
+                                   8                                        (never observed)
+ Certified lower bound ρlb (cm)
+
+
+
+                                                                                                         Condition           Unshielded ↓    S HORT S TOP ↓    Precision ↑
+                                   6
+                                                                                                         Nominal                  9.1              0.6             0.90
+                                   4                                                                     Object-placement        24.7              1.7             0.95
+                                                                                                         Timing                  19.5              1.3             0.94
+                                         margin ε = 2.0cm                                                Visual-shift            21.3              1.2             0.95
+                                   2
+
+                                   0
+                                                                                                                                    TABLE VI
+                                                                                                        M EDIAN PER - DECISION LATENCY BREAKDOWN (K = 8, H = 8, M = 16).
+                                  −2
+                                                                                      not certified              Stage                              Latency (ms)
+                                  −4                                                  certified safe
+                                                                                      ρlb = ρ (tight)            Reachtube propagation (Eq. (1))         3.1
+                                  −6                                                                             STL robustness-to-go (Eq. (2))          1.4
+                                    −4        −2           0      2      4     6                8                Counterexample search (Eq. (3))         3.0
+                                                                                                                 Repair, amortized (Eq. (4))             1.4
+                                                          True robustness (cm)
+                                                                                                                 Total added                             8.9
+Fig. 5. Certificate soundness. Certified robustness-to-go lower bound vs. true
+robustness for executed chunks; all points fall on/below the diagonal (never
+optimistic). Certified-safe chunks (right of the margin line) had zero true
+violations.                                                                                             soundness contract (Assumptions 1–2) and a valid fallback
+                                                                                                        (Assumption 3). It is not a claim that the policy is verified. This
+                                                      TABLE IV                                          is by design — it is what makes the approach scale to hundred-
+                             P ER - ENVIRONMENT BREAKDOWN : U NSHIELDED VS . S HORT S TOP               million-parameter samplers — but it shifts the burden onto
+                                              ( VIOLATION / SUCCESS %).                                 calibrating ε and constructing Xs and πfb . In practice ε is a
+                                                                                                        high-quantile residual bound calibrated on held-out transitions;
+                                                     Violation (%) ↓             Success (%) ↑
+                                                                                                        a conformal or robust-statistics calibration would upgrade the
+Environment                                      Unshld      S HORT S TOP    Unshld      S HORT S TOP   ”empirically sound” certificate (Fig. 5) toward a probabilistic
+LIBERO [56]                                        16.4          1.0           78.1            72.9     guarantee, which we see as the most valuable extension.
+ManiSkill2 [57]                                    21.9          1.6           69.5            63.2           b) Model error under heavy shift.: The soundness con-
+RLBench [58]                                       19.8          1.4           71.0            64.8     tract can be violated if the true dynamics leave the region
+Reach-Avoid-2D                                     16.7          0.5           88.5            84.0
+                                                                                                        where ε was calibrated (e.g. a novel contact mode). S HORT-
+                                                                                                        S TOP degrades gracefully here — larger true error simply
+                                                                                                        makes more chunks fail certification and trigger the fallback —
+across the K candidates, and the numbers are for a single-core
+                                                                                                        but the guarantee is only as good as the error bound. Learned-
+reference implementation — a batched GPU version would
+                                                                                                        model uncertainty quantification and online recalibration are
+shrink them further. Repair is cheap because it reuses the
+                                                                                                        natural pairings.
+counterexample gradient.
+                                                                                                              c) Fallback quality and liveness.: Corollary 1 guarantees
+F. Qualitative example and failure modes                                                                safety, not liveness: a pathological environment could keep the
+   Figure 6 shows a Reach-Avoid-2D episode: the unshielded                                              system in the fallback forever (never making progress). Our
+policy samples a chunk that clips the obstacle, whereas                                                 recovery-rate metric measures exactly how often this happens
+S HORT S TOP’s counterexample search flags the tube corner,                                             (22% of rejection situations do not recover); the repair loop is
+rejects the chunk, and repairs a neighbor that skirts the obstacle                                      what keeps it low. Formal liveness would require assumptions
+and still reaches the goal. Failure modes of S HORT S TOP are                                           on task feasibility we deliberately avoid.
+(i) mis-calibrated ε (if the certified error radius is too small                                              d) Scope of STL specs.: We focus on bounded-horizon
+the soundness contract breaks; our high-quantile calibration                                            avoidance-plus-progress specs, which cover the manipulation
+is conservative but not a formal guarantee under distribution                                           safety constraints we target. Unbounded-horizon or nested-
+shift beyond the calibration set), and (ii) tasks that are in-                                          until specs are supported by the robustness recursion but were
+herently unsafe-adjacent (tight insertion), where the shield’s                                          not stress-tested; their interval bounds can be looser.
+conservatism costs the most success — visible as ManiSkill2                                                   e) Broader impact.: A precise, low-latency, model-
+PegInsertion being our largest success drop.                                                            agnostic shield lowers the barrier to deploying powerful
+                                                                                                        generative policies on real hardware near people. The main
+                                         VIII. D ISCUSSION AND L IMITATIONS                             risk is misplaced trust: the certificate is conditional, and
+    a) What the guarantee does and does not cover.: The-                                                presenting it as absolute could encourage unsafe deployment.
+orem 1 is a conditional guarantee: safety holds given the                                               We therefore report empirical soundness and false-certification
+                                                                                   radius for a probabilistic guarantee, and extension to richer
+              Reach-Avoid-2D: reject + repair
+                                                                                   temporal specifications and multi-agent settings.
+          unshielded (collides)
+          ShortStop (safe)                                   goal                                                R EFERENCES
+                                                                                    [1] C. Chi, S. Feng, Y. Du, Z. Xu, E. Cousineau, B. Burchfiel, and S. Song,
+                                                                                        “Diffusion policy: Visuomotor policy learning via action diffusion,” in
+                                                                                        Robotics: Science and Systems (RSS), 2023.
+                                                                                    [2] M. Janner, Y. Du, J. B. Tenenbaum, and S. Levine, “Planning with
+                                                                                        diffusion for flexible behavior synthesis,” in International Conference
+                                                                                        on Machine Learning (ICML), 2022.
+                                                                                    [3] A. Ajay, Y. Du, A. Gupta, J. B. Tenenbaum, T. S. Jaakkola, and
+                                                                                        P. Agrawal, “Is conditional generative modeling all you need for
+                        counter-
+                              obstacle                                                  decision-making?” in International Conference on Learning Represen-
+                        example x ⋆
+                                                                                        tations (ICLR), 2023.
+                                                                                    [4] Y. Lipman, R. T. Q. Chen, H. Ben-Hamu, M. Nickel, and M. Le,
+                                                                                        “Flow matching for generative modeling,” in International Conference
+                                                                                        on Learning Representations (ICLR), 2023.
+                                                                                    [5] T. Z. Zhao, V. Kumar, S. Levine, and C. Finn, “Learning fine-grained
+                                                                                        bimanual manipulation with low-cost hardware,” in Robotics: Science
+                                                                                        and Systems (RSS), 2023.
+         start                                                                      [6] R. Ivanov, J. Weimer, R. Alur, G. J. Pappas, and I. Lee, “Verisig:
+                                                                                        Verifying safety properties of hybrid systems with neural network con-
+                                                                                        trollers,” in International Conference on Hybrid Systems: Computation
+                                                                                        and Control (HSCC), 2019.
+Fig. 6. Reach-Avoid-2D qualitative example. Unshielded chunk (red) enters           [7] H.-D. Tran, X. Yang, D. Manzanas Lopez, P. Musau, L. V. Nguyen,
+the obstacle; S HORT S TOP rejects it via a counterexample (star) and repairs a         W. Xiang, S. Bak, and T. T. Johnson, “NNV: The neural network
+safe chunk (blue) that reaches the goal. Shaded band is the certified reachtube.        verification tool for deep neural networks and learning-enabled cyber-
+                                                                                        physical systems,” in International Conference on Computer Aided
+                                                                                        Verification (CAV), 2020.
+                                                                                    [8] C. Huang, J. Fan, W. Li, X. Chen, and Q. Zhu, “ReachNN: Reacha-
+rates explicitly, and we recommend the shield be paired with                            bility analysis of neural-network controlled systems,” in International
+hardware-level safety stops rather than replacing them.                                 Conference on Embedded Software (EMSOFT), 2019.
+      f) Simulation-first evaluation.: Our manipulation num-                        [9] M. Everett, G. Habibi, C. Sun, and J. P. How, “Reachability analysis
+                                                                                        of neural feedback loops,” IEEE Access, vol. 9, pp. 163 938–163 953,
+bers are model-derived projections calibrated to published                              2021.
+benchmark rates and to measured 2D-sim behavior (Sec. V,                           [10] A. Solar-Lezama, L. Tancau, R. Bodı́k, S. A. Seshia, and V. Saraswat,
+PLAN.md), not full closed-loop simulator runs; a hardware                               “Combinatorial sketching for finite programs,” in International Con-
+                                                                                        ference on Architectural Support for Programming Languages and
+study is future work. The 2D prototype, however, exercises the                          Operating Systems (ASPLOS), 2006.
+full pipeline end-to-end and produces the soundness evidence                       [11] E. Clarke, O. Grumberg, S. Jha, Y. Lu, and H. Veith, “Counterexample-
+of Fig. 5.                                                                              guided abstraction refinement,” in International Conference on Com-
+                                                                                        puter Aided Verification (CAV), 2000.
+                           IX. C ONCLUSION                                         [12] Y. Annpureddy, C. Liu, G. Fainekos, and S. Sankaranarayanan, “S-
+                                                                                        TaLiRo: A tool for temporal logic falsification for hybrid systems,” in
+   We introduced S HORT S TOP, a counterexample-guided                                  International Conference on Tools and Algorithms for the Construction
+short-horizon shield that makes frozen generative (diffu-                               and Analysis of Systems (TACAS), 2011.
+                                                                                   [13] A. Donzé, “Breach, a toolbox for verification and parameter synthesis
+sion/flow) robot policies safe at runtime without retrain-                              of hybrid systems,” in International Conference on Computer Aided
+ing them. S HORT S TOP propagates a sound short-horizon                                 Verification (CAV), 2010.
+reachtube for each candidate action chunk, certifies an STL                        [14] T. Dreossi, D. J. Fremont, S. Ghosh, E. Kim, H. Ravanbakhsh,
+                                                                                        M. Vazquez-Chanlatte, and S. A. Seshia, “VerifAI: A toolkit for the
+robustness-to-go lower bound over the tube, and closes a                                formal design and analysis of artificial intelligence-based systems,” in
+counterexample loop that rejects unsafe chunks with a concrete                          International Conference on Computer Aided Verification (CAV), 2019.
+witness and repairs a nearby safe alternative. We proved                           [15] A. Corso, R. J. Moss, M. Koren, R. Lee, and M. J. Kochenderfer, “A
+                                                                                        survey of algorithms for black-box safety validation of cyber-physical
+a bounded-time safety theorem, an all-time corollary un-                                systems,” Journal of Artificial Intelligence Research (JAIR), vol. 72, pp.
+der recurrent fallback feasibility, and a conservatism–horizon                          377–428, 2021.
+trade-off bound, and we verified all three empirically. Across                     [16] J. Ho, A. Jain, and P. Abbeel, “Denoising diffusion probabilistic models,”
+                                                                                        in Advances in Neural Information Processing Systems (NeurIPS), 2020.
+LIBERO, ManiSkill2, RLBench, and a 2D reach-avoid proto-                           [17] Y. Song, J. Sohl-Dickstein, D. P. Kingma, A. Kumar, S. Ermon, and
+type under adversarial stress, S HORT S TOP cut safety violations                       B. Poole, “Score-based generative modeling through stochastic differen-
+by 93.6% while retaining 92% of task success and 0.94 inter-                            tial equations,” in International Conference on Learning Representations
+                                                                                        (ICLR), 2021.
+vention precision at 8.9 ms overhead, dominating confidence-                       [18] M. Reuss, M. Li, X. Jia, and R. Lioutikov, “Goal-conditioned imitation
+threshold, MPC-filter, CBF, and STL-monitor baselines on the                            learning using score-based diffusion policies,” in Robotics: Science and
+safety–utility frontier. The key lesson is that counterexample                          Systems (RSS), 2023.
+                                                                                   [19] T. Pearce, T. Rashid, A. Kanervisto, D. Bignell, M. Sun, R. Georgescu,
+guidance — searching each chunk’s reachtube for a falsifier                             S. V. Macua, S. Z. Tan, I. Momennejad, K. Hofmann, and S. Devlin,
+and using it both to certify rejection and to steer repair —                            “Imitating human behaviour with diffusion models,” in International
+is what turns short-horizon reachability from a conservative                            Conference on Learning Representations (ICLR), 2023.
+                                                                                   [20] A. Brohan, N. Brown, J. Carbajal, Y. Chebotar, J. Dabis, C. Finn et al.,
+rejector into a precise, task-preserving shield. Future work is                         “RT-1: Robotics transformer for real-world control at scale,” Robotics:
+a hardware study, conformal calibration of the model-error                              Science and Systems (RSS), 2023.
+[21] Octo Model Team, D. Ghosh, H. Walke, K. Pertsch, K. Black, O. Mees,         [43] K.-C. Hsu, V. Rubies-Royo, C. J. Tomlin, and J. F. Fisac, “Safety
+     S. Dasari, J. Hejna, T. Kreiman, C. Xu et al., “Octo: An open-source             and liveness guarantees through reach-avoid reinforcement learning,” in
+     generalist robot policy,” Robotics: Science and Systems (RSS), 2024.             Robotics: Science and Systems (RSS), 2021.
+[22] M. J. Kim, K. Pertsch, S. Karamcheti, T. Xiao, A. Balakrishna, S. Nair,     [44] M. Althoff, “An introduction to CORA 2015,” in Workshop on Applied
+     R. Rafailov, E. Foster, G. Lam, P. Sanketi et al., “OpenVLA: An open-            Verification for Continuous and Hybrid Systems (ARCH), 2015.
+     source vision-language-action model,” Conference on Robot Learning          [45] X. Chen, E. Ábrahám, and S. Sankaranarayanan, “Flow*: An analyzer
+     (CoRL), 2024.                                                                    for non-linear hybrid systems,” in International Conference on Computer
+[23] T. Power, R. Soltani-Zarrin, S. Iba, and D. Berenson, “Sampling                  Aided Verification (CAV), 2013.
+     constrained trajectories using composable diffusion models,” in IROS        [46] G. Katz, C. Barrett, D. L. Dill, K. Julian, and M. J. Kochenderfer,
+     Workshop on Learning for Motion Planning, 2023.                                  “Reluplex: An efficient SMT solver for verifying deep neural networks,”
+[24] W. Xiao, T.-H. Wang, C. Gan, and D. Rus, “SafeDiffuser: Safe planning            in International Conference on Computer Aided Verification (CAV),
+     with diffusion probabilistic models,” arXiv preprint arXiv:2306.00148,           2017.
+     2023.                                                                       [47] O. Maler and D. Nickovic, “Monitoring temporal properties of con-
+[25] M. Alshiekh, R. Bloem, R. Ehlers, B. Könighofer, S. Niekum, and                 tinuous signals,” in International Symposium on Formal Techniques in
+     U. Topcu, “Safe reinforcement learning via shielding,” in AAAI Con-              Real-Time and Fault-Tolerant Systems (FORMATS/FTRTFT), 2004.
+     ference on Artificial Intelligence, 2018.                                   [48] A. Donzé and O. Maler, “Robust satisfaction of temporal logic over
+[26] B. Könighofer, F. Lorber, N. Jansen, and R. Bloem, “Shield synthesis            real-valued signals,” in International Conference on Formal Modeling
+     for reinforcement learning,” in International Symposium on Leveraging            and Analysis of Timed Systems (FORMATS), 2010.
+     Applications of Formal Methods (ISoLA), 2020.                               [49] G. E. Fainekos and G. J. Pappas, “Robustness of temporal logic spec-
+[27] J. Achiam, D. Held, A. Tamar, and P. Abbeel, “Constrained policy op-             ifications for continuous-time signals,” Theoretical Computer Science,
+     timization,” in International Conference on Machine Learning (ICML),             vol. 410, no. 42, pp. 4262–4291, 2009.
+     2017.                                                                       [50] V. Raman, A. Donzé, M. Maasoumy, R. M. Murray, A. Sangiovanni-
+[28] J. Garcı́a and F. Fernández, “A comprehensive survey on safe reinforce-         Vincentelli, and S. A. Seshia, “Model predictive control with signal
+     ment learning,” Journal of Machine Learning Research (JMLR), vol. 16,            temporal logic specifications,” in IEEE Conference on Decision and
+     no. 1, pp. 1437–1480, 2015.                                                      Control (CDC), 2014.
+[29] A. Ray, J. Achiam, and D. Amodei, “Benchmarking safe exploration in         [51] Y. V. Pant, H. Abbas, and R. Mangharam, “Smooth operator: Control
+     deep reinforcement learning,” arXiv preprint arXiv:1910.01708, 2019.             using the smooth robustness of temporal logic,” in IEEE Conference on
+                                                                                      Control Technology and Applications (CCTA), 2017.
+[30] B. Thananjeyan, A. Balakrishna, S. Nair, M. Luo, K. Srinivasan,
+                                                                                 [52] K. Leung, N. Aréchiga, and M. Pavone, “Back-propagation through
+     M. Hwang, J. E. Gonzalez, J. Ibarz, C. Finn, and K. Goldberg, “Recovery
+                                                                                      signal temporal logic specifications: Infusing logical structure into
+     RL: Safe reinforcement learning with learned recovery zones,” IEEE
+                                                                                      gradient-based methods,” in Workshop on the Algorithmic Foundations
+     Robotics and Automation Letters (RA-L), vol. 6, no. 3, pp. 4915–4922,
+                                                                                      of Robotics (WAFR), 2020.
+     2021.
+                                                                                 [53] J. V. Deshmukh, A. Donzé, S. Ghosh, X. Jin, G. Juniwal, and S. A.
+[31] G. Dalal, K. Dvijotham, M. Vecerik, T. Hester, C. Paduraru, and
+                                                                                      Seshia, “Robust online monitoring of signal temporal logic,” Formal
+     Y. Tassa, “Safe exploration in continuous action spaces,” in arXiv
+                                                                                      Methods in System Design, vol. 51, no. 1, pp. 5–30, 2017.
+     preprint arXiv:1801.08757, 2018.
+                                                                                 [54] A. Abate, D. Ahmed, A. Edwards, M. Giacobbe, and A. Peruffo, “FOS-
+[32] L. Brunke, M. Greeff, A. W. Hall, Z. Yuan, S. Zhou, J. Panerati, and             SIL: A software tool for the formal synthesis of lyapunov functions and
+     A. P. Schoellig, “Safe learning in robotics: From learning-based control         barrier certificates using neural networks,” in International Conference
+     to safe reinforcement learning,” Annual Review of Control, Robotics,             on Hybrid Systems: Computation and Control (HSCC), 2021.
+     and Autonomous Systems, vol. 5, pp. 411–444, 2022.                          [55] Y.-C. Chang, N. Roohi, and S. Gao, “Neural lyapunov control,” in
+[33] K. P. Wabersich and M. N. Zeilinger, “A predictive safety filter for             Advances in Neural Information Processing Systems (NeurIPS), 2019.
+     learning-based control of constrained nonlinear dynamical systems,”         [56] B. Liu, Y. Zhu, C. Gao, Y. Feng, Q. Liu, Y. Zhu, and P. Stone, “LIBERO:
+     Automatica, vol. 129, p. 109597, 2021.                                           Benchmarking knowledge transfer for lifelong robot learning,” in Ad-
+[34] L. Hewing, K. P. Wabersich, M. Menner, and M. N. Zeilinger, “Learning-           vances in Neural Information Processing Systems (NeurIPS) Datasets
+     based model predictive control: Toward safe learning in control,” Annual         and Benchmarks Track, 2023.
+     Review of Control, Robotics, and Autonomous Systems, vol. 3, pp. 269–       [57] J. Gu, F. Xiang, X. Li, Z. Ling, X. Liu, T. Mu, Y. Tang, S. Tao, X. Wei,
+     296, 2020.                                                                       Y. Yao et al., “ManiSkill2: A unified benchmark for generalizable manip-
+[35] D. Q. Mayne, J. B. Rawlings, C. V. Rao, and P. O. M. Scokaert, “Con-             ulation skills,” in International Conference on Learning Representations
+     strained model predictive control: Stability and optimality,” Automatica,        (ICLR), 2023.
+     vol. 36, no. 6, pp. 789–814, 2000.                                          [58] S. James, Z. Ma, D. R. Arrojo, and A. J. Davison, “RLBench: The
+[36] O. Bastani, “Safe reinforcement learning with nonlinear dynamics via             robot learning benchmark and learning environment,” IEEE Robotics
+     model predictive shielding,” in American Control Conference (ACC),               and Automation Letters (RA-L), vol. 5, no. 2, pp. 3019–3026, 2020.
+     2021.                                                                       [59] A. Mandlekar, D. Xu, J. Wong, S. Nasiriany, C. Wang, R. Kulkarni,
+[37] A. D. Ames, S. Coogan, M. Egerstedt, G. Notomista, K. Sreenath,                  L. Fei-Fei, S. Savarese, Y. Zhu, and R. Martı́n-Martı́n, “What matters
+     and P. Tabuada, “Control barrier functions: Theory and applications,”            in learning from offline human demonstrations for robot manipulation,”
+     in European Control Conference (ECC), 2019.                                      in Conference on Robot Learning (CoRL), 2021.
+[38] A. D. Ames, X. Xu, J. W. Grizzle, and P. Tabuada, “Control barrier
+     function based quadratic programs for safety critical systems,” IEEE                                      A PPENDIX A
+     Transactions on Automatic Control, vol. 62, no. 8, pp. 3861–3876, 2017.
+[39] R. Cheng, G. Orosz, R. M. Murray, and J. W. Burdick, “End-to-end                                             P ROOFS
+     safe reinforcement learning through barrier functions for safety-critical
+     continuous control tasks,” in AAAI Conference on Artificial Intelligence,
+                                                                                 A. Proof of Theorem 1
+     2019.                                                                          Let ξ = (xt , xt+1 , . . . , xt+H ) be the realized closed-loop
+[40] S. Bansal, M. Chen, S. Herbert, and C. J. Tomlin, “Hamilton-jacobi
+     reachability: A brief overview and recent advances,” in IEEE Conference
+                                                                                 trajectory under the committed chunk a? . By Assumption 1,
+     on Decision and Control (CDC), 2017.                                        xt ∈ R̂0 and the propagation (1) inflates each set by the
+[41] I. M. Mitchell, A. M. Bayen, and C. J. Tomlin, “A time-dependent            certified error radius εk plus the disturbance bound w̄; hence
+     hamilton-jacobi formulation of reachable sets for continuous dynamic        by induction xt+k ∈ R̂k for all 0 ≤ k ≤ H (soundness
+     games,” IEEE Transactions on Automatic Control, vol. 50, no. 7, pp.
+     947–957, 2005.                                                              of the tube). By Assumption 2, the certified bound satisfies
+[42] J. F. Fisac, A. K. Akametalu, M. N. Zeilinger, S. Kaynama, J. Gillula,      ρ(ϕ, R̂? ) ≤ ρ(ϕ, ξ, 0) because ξ is a trajectory contained in the
+     and C. J. Tomlin, “A general safety framework for learning-based control
+     in uncertain robotic systems,” IEEE Transactions on Automatic Control,
+                                                                                 tube. S HORT S TOP committed a? only because ρ(ϕ, R̂? ) ≥ 
+     vol. 64, no. 7, pp. 2737–2752, 2019.                                        (Alg. 1, line 6/16). Chaining, ρ(ϕ, ξ, 0) ≥ ρ(ϕ, R̂? ) ≥  ≥ 0.
+By the soundness of STL quantitative semantics [48], [49],          inference DDIM steps and an action-chunk length of 16 (of
+a non-negative robustness value is equivalent to satisfaction,      which the shield certifies the first H = 8). Reachtubes use
+and its magnitude is a lower bound on the signed distance           axis-aligned intervals for the six task-space safety coordinates
+to violation; thus ξ |= ϕ with margin at least . For               (end-effector and elbow positions), with a 2nd-order zonotope
+the avoidance fragment ϕ = [0,H] (x ∈    / Xu ) this reads         refinement in the 2D study. The model-error radius ε is the
+min0≤k≤H dist(xt+k , Xu ) ≥  > 0, so the trajectory never          99th-percentile one-step residual on a held-out transition set,
+enters Xu over [t, t + H].                                         inflated by 1.25×. The counterexample search uses M = 16
+                                                                    projected-gradient steps over zonotope generators with ran-
+B. Proof of Corollary 1                                             dom restarts at box vertices. The fallback is a critically-
+   We show xt ∈ Xs for all t by induction. Base: x0 ∈ Xs by         damped task-space braking controller with a pre-certified
+hypothesis. Step: assume xt ∈ Xs . Two cases. (a) S HORT S TOP      robust control-invariant stopping set.
+commits a certified chunk: Theorem 1 gives dist(xt+1 , Xu ) ≥
+, and since Xs was chosen as {x : dist(x, Xu ) ≥ }                                           TABLE VII
+intersected with the robust control-invariant set, the one-step                       D EFAULT HYPERPARAMETERS .
+successor lies in Xs (the committed first action is exactly the
+input certified for step k=1 of the tube, whose reachable set is                Hyperparameter               Value
+contained in the -safe region). (b) No admissible chunk exists                 Candidate chunks K              8
+and πfb is applied: by Assumption 3, f (xt , πfb (xt ))⊕B(w̄) ⊆                 Certified horizon H             8
+Xs , so xt+1 ∈ Xs under any admissible disturbance. In both                     CE-search iterations M         16
+                                                                                Safety margin               2 cm
+cases xt+1 ∈ Xs , completing the induction. Since Xs ∩Xu = ∅,                   Repair trust region δ         0.1
+the trajectory never enters Xu .                                               Repair step size η           0.05
+                                                                                Model-error quantile     99th (×1.25)
+C. Proof of Proposition 1                                                       Disturbance bound w̄      0.5 cm/step
+   Inflation bound (6). Let rk be the Hausdorff radius (worst                   Episodes × seeds            500 × 5
+half-width) of R̂k . For x, x0 ∈ R̂k and the same input at+k ,                  Bootstrap resamples           104
+kfˆ(x, a) − fˆ(x0 , a)k ≤ Lkx − x0 k by local Lipschitzness, so
+the image of a radius- rk set has radius ≤ Lrk ; Eq. (1) then
+adds εmax + w̄, giving rk+1 ≤ Lrk +(εmax + w̄). Unrolling
+                                                    Pk−1 this
+linear recursion yields rk ≤ Lk r0 + (εmax + w̄) j=0 Lj =
+                        k
+                          −1
+Lk r0 + (εmax + w̄) LL−1     for L 6= 1, and the arithmetic sum
+r0 + k(εmax + w̄) for L ≤ 1.
+   Rejection-rate bound (7). A chunk is certified-rejected iff
+its certified margin is below threshold, ρ < . Because ρ
+lower-bounds the true robustness by at most the tube radius
+(the interval bound loses at most rH relative to the nominal
+value, since the tube’s worst point is within rH of the
+nominal trajectory), we have ρnom − rH ≤ ρ ≤ ρnom . Hence
+{ρ < } ⊆ {ρnom <  + rH }, and
+          α(H) = Pr[ρ < ] ≤ Pr[ρnom <  + rH ].
+Split the event at 0: Pr[ρnom < 0] = α? (genuinely unsafe),
+plus the band Pr[0 ≤ ρnom <  + rH ] ≤ β( + rH ) by the
+bounded- density assumption. Adding gives α(H) ≤ α? +
+β( + rH ).
+   Cost bound. Each certified rejection is resolved either by a
+fallback step (cost ≤ cfb ) or by an admissible repair within the
+trust region (cost ≤ crep δ, since the executed chunk deviates
+from the policy sample by at most δ and g is crep -Lipschitz
+in that deviation). Charging the fraction α(H) of rejected
+decisions to a fallback and the executed repairs to their trust-
+region cost yields ∆J(H) ≤ cfb α(H) + crep δ.                  
+                      A PPENDIX B
+            H YPERPARAMETERS AND P ROTOCOL
+  Table VII lists all hyperparameters. Diffusion policies use
+a 1D-convolutional U-Net denoiser with 100 training / 10
+

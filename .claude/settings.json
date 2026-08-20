@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.arxiv.org)",
+      "PowerShell(Get-Command pdflatex -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command miktex -ErrorAction SilentlyContinue)",
+      "Bash(\".venv/Scripts/python.exe\" -m pytest tests/ -q)"
+    ]
+  }
+}

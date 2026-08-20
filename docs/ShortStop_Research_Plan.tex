@@ -1,0 +1,427 @@
+% !TEX program = pdflatex
+\documentclass[a4paper,12pt]{article}
+\usepackage[T5]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amssymb,epsfig,latexsym,multicol,array,hhline,fancyhdr}
+\usepackage{vntex}
+\usepackage{mathptmx}
+\usepackage{titlesec}
+\usepackage{amsmath}
+\usepackage{lastpage}
+\usepackage{enumerate}
+\usepackage{color}
+\usepackage{graphicx}
+\usepackage{array}
+\usepackage{tabularx, caption}
+\usepackage{longtable}
+\usepackage{multirow}
+\usepackage{multicol}
+\usepackage{rotating}
+\usepackage{graphics}
+\usepackage[top=2.5cm, bottom=2.5cm, left=3cm, right=2cm]{geometry}
+\usepackage{setspace}
+\usepackage{epsfig}
+\usepackage{tikz}
+\usepackage{tkz-graph}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, arrows, decorations.pathmorphing, backgrounds}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage[ruled,vlined]{algorithm2e}
+\usepackage{hyperref}
+\hypersetup{urlcolor=blue,linkcolor=black,citecolor=black,colorlinks=true}
+\usepackage{indentfirst}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{listings}
+
+\usepackage{amsthm}
+\newtheorem{theorem}{{\bf Theorem}}
+\newtheorem{property}{{\bf Property}}
+\newtheorem{proposition}{{\bf Proposition}}
+\newtheorem{corollary}[proposition]{{\bf Corollary}}
+\newtheorem{lemma}[proposition]{{\bf Lemma}}
+
+\AtBeginDocument{\renewcommand*\contentsname{Mục lục}}
+\AtBeginDocument{\renewcommand*\refname{Tài liệu tham khảo}}
+\AtBeginDocument{\renewcommand*\figurename{Hình}}
+\AtBeginDocument{\renewcommand*\tablename{Bảng}}
+\AtBeginDocument{\renewcommand*\listfigurename{Danh mục hình ảnh}}
+\AtBeginDocument{\renewcommand*\listtablename{Danh mục bảng}}
+
+\setlength{\headheight}{28pt}
+\pagestyle{fancy}
+\fancyhead{}
+\fancyhead[L]{\small\bf ShortStop --- Kế hoạch nghiên cứu}
+\fancyhead[R]{\small\bf Cong-Tu Le}
+\fancyfoot{}
+\fancyfoot[L]{\scriptsize Counterexample-Guided Short-Horizon Shielding of Generative Robot Policies}
+\fancyfoot[R]{\scriptsize Trang {\thepage}/\pageref{LastPage}}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\footrulewidth}{0.3pt}
+
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{3}
+
+\renewcommand{\thesection}{\Roman{section}}
+\renewcommand{\thesubsection}{\arabic{section}.\arabic{subsection}}
+\renewcommand{\thesubsubsection}{\arabic{section}.\arabic{subsection}.\arabic{subsubsection}}
+
+\setstretch{1.3}
+\setlength{\parindent}{1.27cm}
+\setlength{\parskip}{6pt}
+
+\titleformat{\section}[block]
+{\normalfont\large\bfseries\centering}
+{\thesection.}{0.5em}{\MakeUppercase}
+\titleformat{\subsection}
+{\normalfont\normalsize\bfseries}
+{\thesubsection.}{0.5em}{}
+\titleformat{\subsubsection}
+{\normalfont\normalsize\bfseries\itshape}
+{\thesubsubsection.}{0.5em}{}
+\titlespacing*{\section}{0pt}{18pt}{9pt}
+\titlespacing*{\subsection}{0pt}{12pt}{6pt}
+\titlespacing*{\subsubsection}{0pt}{9pt}{4pt}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{myStyle}{
+backgroundcolor=\color{backcolour},
+commentstyle=\color{codegreen},
+keywordstyle=\color{magenta},
+numberstyle=\tiny\color{codegray},
+stringstyle=\color{codepurple},
+basicstyle=\ttfamily\footnotesize,
+breakatwhitespace=false,
+breaklines=true,
+keepspaces=true,
+numbers=left,
+numbersep=5pt,
+showspaces=false,
+showstringspaces=false,
+showtabs=false,
+tabsize=2,
+extendedchars=false,
+}
+\lstset{style=myStyle}
+
+\let\stdsection\section
+\renewcommand{\section}{\clearpage\stdsection}
+
+% Checklist ($\square$ items the user can hand-edit to $\blacksquare$/\checkmark when done)
+\newlist{tasklist}{itemize}{2}
+\setlist[tasklist]{label=$\square$,leftmargin=1.6em,itemsep=2pt,topsep=2pt}
+
+\newcommand{\new}{\textcolor{red!60!black}{\textbf{[MỚI]}}}
+\newcommand{\known}{\textcolor{green!40!black}{\textbf{[ĐÃ BIẾT --- từ MPC paper]}}}
+\newcommand{\bridge}{\textcolor{blue!50!black}{\textbf{[CẦU NỐI]}}}
+
+\title{\textbf{Kế hoạch nghiên cứu: ShortStop --- \\ Counterexample-Guided Short-Horizon Shielding \\ of Generative Robot Policies}}
+\author{Cong-Tu Le \\ \small Ghi chú cá nhân phục vụ theo dõi \& chỉnh sửa tiến độ NCKH}
+\date{Khởi tạo: 14/08/2026}
+
+% ============================================================
+\begin{document}
+% ============================================================
+\maketitle
+\tableofcontents
+
+\section*{Ghi chú sử dụng file này}
+\begin{itemize}
+  \item Mỗi mục có ô $\square$ — sửa thành $\blacksquare$ hoặc thêm ``(xong dd/mm)'' khi hoàn thành. Đây là file sống, chỉnh sửa trực tiếp khi tiến độ thay đổi.
+  \item \new{} = khái niệm hoàn toàn mới, chưa xuất hiện trong paper MPC trước đó. \known{} = đã từng dùng trong paper MPC (\emph{Model Predictive Control based Trajectory Tracking for Autonomous Vehicles}). \bridge{} = có nền tảng từ MPC paper nhưng cần mở rộng thêm.
+  \item Ước lượng thời gian là \emph{gợi ý khởi điểm}, không phải deadline cứng — điều chỉnh theo tốc độ cá nhân và thời gian rảnh thực tế.
+\end{itemize}
+
+%=====================================================================
+\part*{PHẦN I --- HAI KẾ HOẠCH SONG SONG}
+%=====================================================================
+
+\section{Nguyên tắc tổ chức chung}
+Hai track chạy \textbf{song song}, không nối tiếp:
+\begin{itemize}
+  \item \textbf{Track A (Lý thuyết)}: đọc hiểu Sec.~I--IV — bài toán, related work, method, các định lý an toàn.
+  \item \textbf{Track B (Thực nghiệm)}: Sec.~V--VIII — dựng lại pipeline từ dễ (2D prototype) đến khó (LIBERO/ManiSkill2/RLBench).
+\end{itemize}
+Lý do chạy song song: Track B (code 2D reach-avoid) không cần chờ hiểu hết Track A — chỉ cần hiểu xong Module 3 (Method) là đã đủ để bắt đầu code. Ngược lại, code thực tế sẽ giúp hiểu Track A sâu hơn (ví dụ: tự code reachtube sẽ làm rõ Assumption 1 ở Sec.~IV). Vì vậy nên xen kẽ: đọc lý thuyết buổi sáng, code buổi chiều, cùng một module/phase trong cùng tuần.
+
+Nền tảng đã có (từ paper MPC): mô hình động học xe, tuyến tính hoá Taylor, MPC với ràng buộc (QP, Hildreth), so sánh với LQR, vòng lặp điều khiển receding-horizon, đánh giá bằng cross-track error. Đây chính là điểm tựa cho \textbf{MPC-Filter baseline} và trực giác về receding-horizon trong ShortStop — không phải học lại từ đầu.
+
+Khoảng trống lớn cần lấp (hoàn toàn mới, không có trong paper MPC): generative policy (diffusion/flow), reachability analysis (zonotope/interval), Signal Temporal Logic, counterexample-guided synthesis/falsification, control barrier functions. Bốn mảng này được dàn trải xuyên suốt Track A \S\ref{sec:planA} và có lộ trình làm quen riêng ở \S\ref{sec:rampup}.
+
+%---------------------------------------------------------------------
+\section{Track A --- Kế hoạch Lý thuyết (Sec. I--IV)}\label{sec:planA}
+%---------------------------------------------------------------------
+
+\subsection{Module 1 --- Bài toán \& Giới thiệu (Sec. I)}
+\textbf{Mục tiêu}: hiểu vì sao verify toàn phần một generative policy là bất khả thi, nhưng verify "hậu quả ngắn hạn" (short-horizon consequence) của một chunk hành động cụ thể lại khả thi.
+
+\textbf{Khái niệm/keyword cần nắm}:
+\begin{itemize}
+  \item Generative robot policy, diffusion policy, flow matching, \emph{action chunk} \new
+  \item Runtime safety filter / shielding (khái niệm tổng quát) \new
+  \item Reachable-set over-approximation (giới thiệu sơ bộ, đào sâu ở Module 3) \new
+  \item Signal Temporal Logic — chỉ cần biết "STL là ngôn ngữ đặc tả tính chất theo thời gian" ở mức giới thiệu \new
+  \item Counterexample-guided loop (CEGIS/CEGAR) — trực giác "tìm phản ví dụ để bác bỏ rồi sửa" \new
+  \item Bounded-time vs. all-time safety guarantee \new
+\end{itemize}
+
+\textbf{Sản phẩm đầu ra}:
+\begin{tasklist}
+  \item Viết lại bằng lời của mình (nửa trang) ý tưởng cốt lõi: "không cần verify $\pi_\theta$, chỉ cần verify hậu quả của 1 chunk cụ thể".
+  \item Liệt kê 4 bước P-R-C-S (Propose, Reach, Certify, Select/repair) kèm 1 câu mô tả mỗi bước, dựa trên Fig.~1.
+  \item Ghi lại 4 con số kết quả chính (Sec.~I.d): 18.7\%$\to$1.2\% violation, 92\% success giữ lại, 0.94 precision, 8.9\,ms latency.
+\end{tasklist}
+\textit{Ước lượng: 0.5--1 buổi.}
+
+\subsection{Module 2 --- Related Work (Sec. II, A--H)}
+\textbf{Mục tiêu}: định vị ShortStop trong 7 nhánh literature, hiểu rõ "gap" (Sec.~II.H) — nhánh nào gần với nền tảng MPC/CBF của bạn thì tận dụng, nhánh nào hoàn toàn mới thì dành thời gian.
+
+\begin{tasklist}
+  \item[\square] \textbf{II.A Generative robot policies} \new — Diffusion Policy [1], planning-as-inference [2],[3], flow matching [4], VLA models [20]--[22]. \emph{Đọc thêm tối thiểu}: abstract của [1] (Diffusion Policy, RSS 2023) và [4] (Flow Matching, ICLR 2023).
+  \item[\square] \textbf{II.B Constrained/safe generative planning} \new — sampler bias theo constraint [23], SafeDiffuser [24] (nhúng CBF vào denoiser). So sánh: ShortStop là hậu kiểm (post-hoc), không sửa generator — khác cơ bản với [24].
+  \item[\square] \textbf{II.C Shielding \& safe RL} \new — shield tự động hữu hạn trạng thái [25],[26]; safe RL [27]--[29]; recovery RL [30],[31]. Ghi chú khác biệt: shield cổ điển giả định automaton rời rạc đã biết; ShortStop bảo vệ một tube liên tục, chiều cao.
+  \item[\square] \textbf{II.D Predictive safety filters, MPC, CBF} \bridge — \emph{đây là phần bạn có nền tảng nhất}: MPC filter [33] (Wabersich \& Zeilinger) chính là baseline \texttt{MPC-Filter} trong Table II; CBF-QP [37]--[39] là baseline \texttt{CBF-Shield}. Đối chiếu trực tiếp với cost-function/QP bạn đã cài (Hildreth QP) trong paper MPC trước — cùng họ "constrained optimal control", khác ở chỗ MPC-Filter chỉ sửa 1 action, còn ShortStop chọn/sửa cả một batch chunk.
+  \item[\square] \textbf{II.E Reachability analysis} \new — CORA [44], Flow* [45], neural-feedback-loop reachability [6]--[9],[46]. Chỉ cần hiểu khái niệm "reachtube" và vì sao không reach xuyên qua $\pi_\theta$.
+  \item[\square] \textbf{II.F STL \& robustness} \new — nền tảng [47]--[49], robust online monitoring [53] (chính là baseline \texttt{STL-Monitor}).
+  \item[\square] \textbf{II.G CEGIS/CEGAR \& falsification} \new — CEGIS [10], CEGAR [11], công cụ falsification S-TaLiRo/Breach/VerifAI [12]--[14].
+  \item[\square] \textbf{II.H Positioning/gap} — tự viết bảng 4 dòng (i)--(iv) tại sao mỗi hướng cũ chưa giải quyết được bài toán (mỗi dòng 1 câu, dựa theo văn bản gốc).
+\end{tasklist}
+\textit{Ước lượng: 1.5--2 buổi (phần D nhanh vì có nền; phần A,E,F,G tốn thời gian hơn).}
+
+\subsection{Module 3 --- Method: ShortStop (Sec. III) --- module nặng nhất}
+Chia theo đúng 4 giai đoạn P-R-C-S; đây là phần cần hiểu sâu nhất vì Track B sẽ code trực tiếp từ đây.
+
+\begin{tasklist}
+  \item[\square] \textbf{III.A Problem setup} \bridge — $x_{t+1} = f(x_t,a_t) + w_t$, $\|w_t\|\le \bar w$: giống hệt dạng state-space bạn dùng cho vehicle model, chỉ thêm nhiễu $w_t$ có chặn. Nắm Table I (ký hiệu) trước khi đọc tiếp.
+  \item[\square] \textbf{III.C (P) Chunk proposal} \new — $K=8$ chunk mẫu từ $\pi_\theta$, điểm số $g(a^{(i)})$. Hiểu: shield không tìm kiếm toàn bộ action space, chỉ lọc trong $K$ mẫu.
+  \item[\square] \textbf{III.D (R) Reachable-set over-approximation} \new — công thức (1): $\hat R_{k+1} = \hat f(\hat R_k, a_{t+k}) \oplus B(\varepsilon_k + \bar w)$. Khái niệm cần học riêng: Minkowski sum $\oplus$, norm ball $B(r)$, interval/zonotope set representation, Lipschitz continuity của $\hat f$ (xem lộ trình \S\ref{sec:rampup}).
+  \item[\square] \textbf{III.E (C) STL robustness-to-go} \new — công thức (2): $\rho(\phi,\hat R) = \min_{0\le k\le H} \inf_{x\in\hat R_k} \mathrm{dist}(x,X_u)$. Cần học: cú pháp STL cơ bản ($\wedge,\vee,\square_{[0,H]}$ (always), $\lozenge_{[0,H]}$ (eventually)), ngữ nghĩa robustness định lượng.
+  \item[\square] \textbf{III.F (S) Counterexample search \& repair} \new — bài toán đối nghịch (3): $\arg\min \mathrm{dist}(x,X_u)$ giải bằng projected gradient/vertex sampling; hướng sửa (4) $d=\nabla_a \mathrm{dist}(\phi(x_t,a)_{k^\star},X_u)$; repair có trust region $\|\Delta a\|\le\delta$. \bridge{} — trust region + projected gradient có họ hàng với ràng buộc $-25^\circ\le\delta\le25^\circ$ và QP-with-constraints bạn đã làm, chỉ khác đây là gradient step có chiếu, không phải QP kín.
+  \item[\square] \textbf{III.G Selection \& fallback} — công thức (5): chọn $a^\star=\arg\max g(a^{(i)})$ trong tập admissible; nếu rỗng thì gọi $\pi_{fb}$ (braking/retreat controller). \bridge{} — $\pi_{fb}$ tương tự một bộ điều khiển an toàn dự phòng, có thể liên tưởng LQR/PD đơn giản trong paper MPC.
+  \item[\square] \textbf{III.H Complexity} — $K$ reachtube propagation + $K\times M$ vòng lặp inner-search, độc lập nên song song hoá được; $K{=}8,H{=}8,M{=}16 \Rightarrow$ 8.9\,ms.
+  \item[\square] \textbf{Tự vẽ lại Algorithm 1} từng dòng bằng lưu đồ của riêng mình, không nhìn bài — đây là bài kiểm tra hiểu thật sự trước khi sang Track B.
+\end{tasklist}
+\textit{Ước lượng: 3--4 buổi (đa số thời gian ở III.D, III.E do khái niệm mới hoàn toàn).}
+
+\subsection{Module 4 --- Lý thuyết an toàn (Sec. IV) + chứng minh (Phụ lục A)}
+\begin{tasklist}
+  \item[\square] \textbf{Assumption 1--3} — sound over-approximation, sound STL bound, safe fallback tồn tại. Ghi rõ vì sao mỗi assumption \emph{cần thiết} (không có nó thì theorem sập ở đâu).
+  \item[\square] \textbf{Theorem 1 (bounded-time safety)} — tự chứng minh lại (không nhìn Phụ lục A.A) rồi đối chiếu.
+  \item[\square] \textbf{Corollary 1 (all-time safety)} — chứng minh quy nạp theo $t$, dựa trên $X_s$ bất biến. Tự làm lại phần quy nạp.
+  \item[\square] \textbf{Proposition 1 (conservatism--horizon trade-off)} — bất đẳng thức Grönwall-type (6), tách $\alpha(H)\le\alpha^\star+\beta(\varepsilon+r_H)$ (7). Cần ôn: bất đẳng thức Grönwall rời rạc, khai triển truy hồi tuyến tính. \new
+  \item[\square] Liên hệ Fig.~4 (horizon sensitivity) với Proposition 1: giải thích bằng lời tại sao có \emph{interior-optimum} $H^\star=8$.
+\end{tasklist}
+\textit{Ước lượng: 2--3 buổi (phần quy nạp/Grönwall là mảng toán mới, cần thời gian riêng nếu chưa quen chứng minh dạng này).}
+
+%---------------------------------------------------------------------
+\section{Track B --- Kế hoạch Thực nghiệm (Sec. V--VIII), từ dễ đến khó}\label{sec:planB}
+%---------------------------------------------------------------------
+
+\textbf{Nguyên tắc}: paper tự cho một \emph{lộ trình dễ$\to$khó} có sẵn — chính là bảng ablation (Table III, Sec.~VII.A): Reach-only $\to$ +STL-to-go $\to$ +CE search $\to$ +Repair. Track B bám theo đúng thứ tự này, dựng trước trên môi trường \texttt{Reach-Avoid-2D} (nhẹ nhất, chính là môi trường prototype gốc của paper).
+
+\subsection{Phase 0 --- Chuẩn bị công cụ (Setup)}
+\begin{tasklist}
+  \item[\square] Python env (venv/conda) + \texttt{numpy/scipy/matplotlib}.
+  \item[\square] Thư viện set-propagation: chọn 1 trong \texttt{pypoman}, \texttt{zonopy}, hoặc tự viết interval arithmetic tối giản (khuyến nghị tự viết cho 2D — đơn giản, giúp hiểu Assumption 1 sâu hơn) \new.
+  \item[\square] Thư viện STL monitoring: \texttt{RTAMT} (rtamt) hoặc tự cài robustness recursion cho $\square,\lozenge,\wedge,\vee$ trên interval — 2D nên tự code để bám sát công thức (2). \new
+  \item[\square] Solver QP nhẹ cho baseline CBF/MPC-Filter: \texttt{cvxpy} hoặc \texttt{qpsolvers} (bạn đã quen QP qua Hildreth method — chuyển sang \texttt{cvxpy} là bước nhỏ) \bridge.
+  \item[\square] (Khi cần leo lên môi trường thật) cài đặt \texttt{LIBERO}, \texttt{ManiSkill2}, \texttt{RLBench} — nặng, cần GPU; để dành cho Phase 6.
+\end{tasklist}
+
+\subsection{Phase 1 (DỄ) --- Môi trường Reach-Avoid-2D + Reach-only rejector}
+\begin{tasklist}
+  \item[\square] Dựng point-mass 2D, vài obstacle hình tròn (giống Fig.~6), động lực học tuyến tính đơn giản $x_{t+1}=x_t+a_t\Delta t$.
+  \item[\square] Cài đặt propagation công thức (1) dạng interval/box đơn giản (chưa cần zonotope).
+  \item[\square] Cài "Reach-only rejector": từ chối chunk nếu $\hat R_k \cap X_u \ne \emptyset$ với bất kỳ $k$. Kỳ vọng tái lập: violation $\approx 3.8\%$, success $\approx 64.1\%$ (Table III, dòng 1) — dùng số này làm mốc so sánh khi tự chạy.
+  \item[\square] Cài \emph{policy giả lập} (vì chưa train diffusion policy thật): sinh $K$ chunk ứng viên bằng nhiễu Gaussian quanh một reference trajectory — đủ để test pipeline an toàn, chưa cần generative model thật ở bước này.
+\end{tasklist}
+
+\subsection{Phase 2 (VỪA) --- Thêm STL robustness-to-go}
+\begin{tasklist}
+  \item[\square] Thay điều kiện reject nhị phân bằng $\rho(\phi,\hat R)$ công thức (2); kỳ vọng violation giảm còn $\approx 2.9\%$, success $\approx 66.0\%$.
+  \item[\square] Vẽ lại Fig.~3 (ablation cumulative, điểm ``+STL-to-go'') từ số liệu tự chạy — so sánh với số của paper.
+\end{tasklist}
+
+\subsection{Phase 3 (VỪA) --- Counterexample search}
+\begin{tasklist}
+  \item[\square] Cài inner adversarial search (3) bằng projected gradient/vertex sampling trên box 2D (rẻ, low-dim); kỳ vọng $\approx 1.7\%$ violation, $0.44$ recovery.
+  \item[\square] Vẽ lại Fig.~3 (ablation cumulative, điểm ``+CE-search'') từ số liệu tự chạy — so sánh với số của paper.
+\end{tasklist}
+
+\subsection{Phase 4 (VỪA-KHÓ) --- Repair loop + đủ 7 metrics + baselines dễ}
+\begin{tasklist}
+  \item[\square] Cài repair (4): bước gradient $\eta d$, chiếu về trust region $\delta$; ghép lại thành ShortStop đầy đủ (Algorithm 1). Kỳ vọng $\approx 1.2\%$ violation, $0.78$ recovery — full match Table III dòng cuối.
+  \item[\square] Cài đủ 7 metric (định nghĩa ở \S\ref{sec:extraction}, mục Metrics) trên 2D env.
+  \item[\square] Cài baseline \textbf{Unshielded} và \textbf{Conf-Thresh} (ngưỡng theo độ lệch giữa các mẫu ensemble) — rẻ nhất.
+  \item[\square] Cài baseline \textbf{MPC-Filter} \bridge — QP sửa action tối thiểu; tái dùng trực tiếp kinh nghiệm Hildreth-QP từ paper MPC.
+  \item[\square] Cài baseline \textbf{STL-Monitor} — chỉ dùng nominal rollout của $\hat f$, không có reachtube/CE search (dễ vì đã có STL module từ Phase 2).
+  \item[\square] Cài baseline \textbf{CBF-Shield} \new — cần định nghĩa hand-designed barrier function cho obstacle tròn 2D (mới nhưng đơn giản ở 2D).
+  \item[\square] Vẽ lại Fig.~2 (safety--utility frontier) với 6 method trên env của mình.
+\end{tasklist}
+
+\subsection{Phase 5 (KHÓ) --- Stress tests + horizon sensitivity + thống kê}
+\begin{tasklist}
+  \item[\square] Stress test: object-placement (dịch obstacle $\pm6$cm), timing jitter, visual-shift (bỏ qua nếu 2D không có ảnh — có thể thay bằng nhiễu quan sát/observation noise tương đương).
+  \item[\square] Horizon sweep $H$: tái tạo Fig.~4, kiểm tra có xuất hiện interior-optimum $H^\star$ hay không trên env của mình.
+  \item[\square] Paired bootstrap significance ($10^4$ resample) trên nhiều seed — \new, cần đọc nhanh về bootstrap test nếu chưa quen.
+\end{tasklist}
+
+\subsection{Phase 6 (KHÓ NHẤT, tuỳ resource) --- Leo lên môi trường thật}
+\begin{tasklist}
+  \item[\square] Train/nạp một diffusion policy thật (theo recipe [59]) trên một suite nhỏ của LIBERO hoặc ManiSkill2 — cần GPU đáng kể.
+  \item[\square] Thay policy giả lập ở Phase 1--5 bằng policy thật; lặp lại toàn bộ pipeline.
+  \item[\textbf{Lưu ý quan trọng}] Chính paper cũng ghi rõ (Sec.~V.F, "Reproducibility note"): số liệu LIBERO/ManiSkill2/RLBench trong bài là \emph{model-derived projections calibrated} theo rate published + đo 2D-sim, \textbf{không phải} full closed-loop simulator run; paper dẫn tới một \texttt{PLAN.md} riêng mô tả cách thay bằng full run. $\Rightarrow$ đây là phần tốn công nhất và cũng là chỗ bạn có thể đóng góp thật (chạy full simulator thay vì projection) nếu muốn mở rộng.
+\end{tasklist}
+
+%---------------------------------------------------------------------
+\section{Lộ trình làm quen khái niệm mới (chạy song song, không phải track thứ 3)}\label{sec:rampup}
+%---------------------------------------------------------------------
+4 cụm khái niệm sau \textbf{không} có trong paper MPC trước đó và cần tài liệu bổ trợ \emph{ngoài} bài ShortStop (paper chỉ dùng, không dạy từ đầu). Nên học "vừa đủ dùng" (just-in-time), gắn trực tiếp với module/phase đang cần, thay vì học toàn bộ lý thuyết trước.
+
+\begin{tabularx}{\textwidth}{@{}l l X l@{}}
+\toprule
+Cụm khái niệm & Cần cho & Mức độ tối thiểu cần & Gắn với \\
+\midrule
+Diffusion / flow-matching policy & Module 1--3, Phase 6 & Hiểu sampler sinh action chunk là gì, không cần hiểu sâu training DDPM & Sec.~II.A, III.C \\
+Reachability (interval/zonotope, Minkowski sum, Lipschitz) & Module 3.D, Module 4, Phase 1--3 & Đủ để tự code interval propagation 2D & III.D, IV, Prop.~1 \\
+Signal Temporal Logic (cú pháp, robustness) & Module 3.E, Phase 2 & Đủ để tự code $\square,\lozenge$ trên tube & III.E, II.F \\
+CEGIS/CEGAR, falsification & Module 2.G, Module 3.F, Phase 3 & Trực giác "phản ví dụ để bác bỏ + sửa", không cần đọc full CEGIS paper & III.F, II.G \\
+Control Barrier Functions (QP) & Module 2.D, Phase 4 & Đủ để code 1 barrier tròn 2D & II.D, CBF-Shield baseline \\
+\bottomrule
+\end{tabularx}
+
+\textbf{Gợi ý}: dừng lại đúng lúc pipeline 2D chạy được — không cần thành chuyên gia formal-methods trước khi code; code xong Phase 1--4 sẽ tự củng cố lại phần lý thuyết còn mơ hồ.
+
+%---------------------------------------------------------------------
+\section{Lộ trình gộp theo tuần (gợi ý, điều chỉnh tự do)}
+%---------------------------------------------------------------------
+\begin{longtable}{@{}p{1.6cm} p{7.6cm} p{7.4cm}@{}}
+\toprule
+Tuần & Track A (Lý thuyết) & Track B (Thực nghiệm) \\
+\midrule
+\endhead
+1 & Module 1 (Sec.~I) + Module 2.D (D--nền tảng MPC/CBF, nhanh) & Phase 0 (setup) + bắt đầu Phase 1 (2D env) \\
+2 & Module 2 (phần A,E,F,G — khái niệm mới) & Phase 1 hoàn tất (Reach-only rejector chạy đúng số liệu Table III dòng 1) \\
+3 & Module 3.A--D (problem setup, Propose, Reach) & Phase 2 bắt đầu (thêm STL robustness-to-go) \\
+4 & Module 3.E--H (STL-to-go, CE search, repair, complexity) & Phase 2 hoàn tất; Phase 3 (CE search) chạy đúng $\approx1.7\%$ \\
+5 & Tự vẽ lại Algorithm 1; bắt đầu Module 4 (Assumptions, Thm.~1) & Phase 4: repair loop (full ShortStop) + 7 metrics \\
+6 & Module 4 hoàn tất (Corollary 1, Proposition 1, tự chứng minh) & Phase 4: baselines Unshielded/Conf-Thresh/MPC-Filter \\
+7 & Ôn lại toàn Track A; đối chiếu lý thuyết $\leftrightarrow$ số liệu tự chạy & Phase 4: baseline STL-Monitor, CBF-Shield; vẽ Fig.~2 \\
+8 & (dự phòng / đọc sâu reference gốc nếu còn thời gian) & Phase 5: stress tests + horizon sweep + bootstrap \\
+9+ & --- & Phase 6 (tuỳ resource GPU): leo lên LIBERO/ManiSkill2 \\
+\bottomrule
+\end{longtable}
+
+%=====================================================================
+\part*{PHẦN II --- TRÍCH XUẤT THÔNG TIN BÀI BÁO (bảng theo dõi \& chỉnh sửa)}\label{sec:extraction}
+%=====================================================================
+\textit{Nội dung dưới đây trích từ bài báo, mục đích để bạn theo dõi hiểu biết của mình theo thời gian. Phần ``Ghi chú của bạn'' để trống — tự điền/sửa khi hiểu sâu hơn hoặc khi tiến độ thay đổi.}
+
+\subsection*{1. Problem (Bài toán)}
+Làm cho một generative robot policy (diffusion/flow-matching) đã huấn luyện sẵn, \emph{đông cứng} (frozen, không retrain), trở nên an toàn tại runtime — trong khi việc verify hình thức toàn phần bộ sampler (hàng trăm triệu tham số, unroll qua contact dynamics) là bất khả thi. Cụ thể: cần lọc/sửa các \emph{action chunk} (chuỗi hành động tương lai độ dài $H$) do policy đề xuất, sao cho chunk được thực thi không vi phạm một đặc tả an toàn STL, với chi phí đủ rẻ để chạy real-time (10--20\,Hz).
+
+\begin{tasklist}
+  \item[\square] \textit{Ghi chú của bạn:} \underline{\hspace{10cm}}
+\end{tasklist}
+
+\subsection*{2. Novelty (Điểm mới)}
+\begin{itemize}
+  \item Shield \emph{hậu kiểm} (post-hoc) đầu tiên, có counterexample-guided loop, cho generative robot policy — không sửa/retrain generator (khác [24] SafeDiffuser).
+  \item Kết hợp 3 thành phần chưa từng ghép chung: (a) reachtube over-approximation \emph{sound}, (b) STL robustness-to-go tính trên cả tube (không phải trên 1 nominal trajectory), (c) reject-and-repair loop dùng counterexample cụ thể vừa để chứng minh reject vừa để định hướng sửa.
+  \item Chứng minh \emph{bounded-time safety theorem} + hệ quả \emph{all-time safety} (recurrent fallback feasibility) + \emph{conservatism--horizon trade-off bound} — baseline khác (MPC-Filter, CBF-Shield, STL-Monitor) không có bộ 3 guarantee này.
+  \item Xử lý cả \emph{batch} $K$ chunk nhiệt đới, không chỉ 1 action đơn (khác MPC-Filter/CBF cổ điển chỉ sửa 1 input).
+\end{itemize}
+\begin{tasklist}
+  \item[\square] \textit{Ghi chú của bạn:} \underline{\hspace{10cm}}
+\end{tasklist}
+
+\subsection*{3. Significance (Ý nghĩa)}
+\begin{itemize}
+  \item Giảm safety-violation rate $18.7\%\to1.2\%$ (giảm tương đối 93.6\%), giữ 92\% task success, precision 0.94, chỉ thêm 8.9\,ms latency — Pareto-dominate cả 4 baseline (Conf-Thresh, MPC-Filter, CBF-Shield, STL-Monitor) trên đồ thị safety--success--precision (Fig.~2).
+  \item Cho phép triển khai policy sinh (VLA/diffusion) cỡ lớn gần con người với một \emph{certificate} có điều kiện rõ ràng, thay vì "tin tưởng mù" vào generative model — hướng đi thực tế cho safe deployment thay vì full formal verification.
+\end{itemize}
+\begin{tasklist}
+  \item[\square] \textit{Ghi chú của bạn:} \underline{\hspace{10cm}}
+\end{tasklist}
+
+\subsection*{4. Related Work (Tóm tắt 7 nhánh — chi tiết ở Module 2)}
+\begin{itemize}
+  \item[A.] Generative robot policies — không có safety certificate (gap chính).
+  \item[B.] Constrained/safe generative planning — sửa generator, guarantee mềm (khác ShortStop).
+  \item[C.] Shielding \& safe RL — giả định automaton rời rạc / train-time, không hợp continuous high-dim chunk.
+  \item[D.] Predictive safety filters, MPC, CBF — closest baselines, chỉ sửa 1 action, cần model/CBF tường minh.
+  \item[E.] Reachability analysis — công cụ nền, chưa ai dùng cho generative policy theo cách này.
+  \item[F.] STL \& robustness — trước giờ chủ yếu đánh giá trên 1 nominal trajectory, không phải cả tube.
+  \item[G.] CEGIS/CEGAR/falsification — ShortStop là người đầu tiên đóng vòng lặp counterexample quanh generative policy tại deployment time.
+\end{itemize}
+\begin{tasklist}
+  \item[\square] \textit{Ghi chú của bạn:} \underline{\hspace{10cm}}
+\end{tasklist}
+
+\subsection*{5. Current Progress (Trạng thái hiện tại của chính bài báo)}
+\begin{itemize}
+  \item Đã có: chứng minh lý thuyết đầy đủ (Sec.~IV, Phụ lục A); prototype 2D reach-avoid chạy end-to-end thật (cho ra bằng chứng "empirically sound" ở Fig.~5); component ablation đầy đủ (Table III).
+  \item \textbf{Quan trọng}: số liệu trên LIBERO/ManiSkill2/RLBench (Table II, IV, V) là \emph{model-derived projections} hiệu chỉnh theo rate đã công bố + đo 2D-sim — \textbf{không phải} full closed-loop simulator run thật (paper tự thừa nhận ở Sec.~V.F và Sec.~VIII). Có dẫn một \texttt{PLAN.md} riêng mô tả cách thay bằng full run.
+  \item Chưa có: hardware study (chỉ simulation-first).
+\end{itemize}
+\begin{tasklist}
+  \item[\square] \textit{Tiến độ của bạn (tự cập nhật):} \underline{\hspace{10cm}}
+\end{tasklist}
+
+\subsection*{6. Challenges (Thách thức, kể cả khi tự tái lập)}
+\begin{itemize}
+  \item Hiệu chỉnh $\varepsilon$ (model-error bound) đúng cách — nếu $\varepsilon$ quá nhỏ, soundness contract vỡ, certificate không còn đúng.
+  \item Xây dựng $X_s$/$\pi_{fb}$ (safe fallback + robust control-invariant set) hợp lệ — Assumption 3 không tự động đúng, cần thiết kế.
+  \item Guarantee chỉ là \emph{safety}, không đảm bảo \emph{liveness} — có thể kẹt ở fallback mãi mãi (22\% trường hợp reject không recover được).
+  \item Scope STL giới hạn ở avoidance-plus-progress có horizon hữu hạn; unbounded/nested-until chưa được stress-test.
+  \item Model error dưới shift mạnh (novel contact mode) có thể phá vỡ soundness contract.
+  \item \textbf{Với riêng bạn khi tái lập}: dựng lại số liệu thật trên LIBERO/ManiSkill2/RLBench (thay vì projection) đòi hỏi train diffusion policy thật + GPU + simulator nặng — đây là rào cản resource lớn nhất, nên để ở Phase 6, không bắt buộc.
+\end{itemize}
+\begin{tasklist}
+  \item[\square] \textit{Ghi chú của bạn:} \underline{\hspace{10cm}}
+\end{tasklist}
+
+\subsection*{7. Metrics (7 chỉ số)}
+\begin{itemize}
+  \item \textbf{Safety-violation rate} — \% episode vào $X_u$ (càng thấp càng tốt).
+  \item \textbf{Task success} — \% hoàn thành mục tiêu.
+  \item \textbf{Shield-activation rate} — \% quyết định bị reject/repair/fallback.
+  \item \textbf{Intervention precision} — tỉ lệ can thiệp là "cần thiết thật" (đo bằng privileged rollout của chunk bị reject).
+  \item \textbf{Latency} — ms thêm vào mỗi quyết định (median).
+  \item \textbf{Conservatism cost} — sụt task success trên các episode \emph{không} có sự kiện mất an toàn thật.
+  \item \textbf{Recovery rate} — tỉ lệ tình huống bị reject nhưng vẫn hoàn thành task (đo giá trị của repair so với reject thuần).
+\end{itemize}
+\begin{tasklist}
+  \item[\square] \textit{Ghi chú của bạn (đã code được metric nào):} \underline{\hspace{10cm}}
+\end{tasklist}
+
+\subsection*{8. Datasets / Environments}
+\begin{itemize}
+  \item \textbf{LIBERO} [56] — suite Goal/Object/Spatial/Long, Franka Panda, input RGB + proprioception.
+  \item \textbf{ManiSkill2} [57] — PickCube, StackCube, PegInsertionSide (contact-rich precision).
+  \item \textbf{RLBench} [58] — reach-target, close-box, put-in-drawer.
+  \item \textbf{Reach-Avoid-2D} — môi trường point-mass phẳng tự dựng, dùng cho prototype chạy thật + soundness study (Fig.~5,6).
+  \item Dữ liệu huấn luyện policy: demonstration theo từng suite, imitation learning theo recipe của Mandlekar et al. [59].
+\end{itemize}
+\begin{tasklist}
+  \item[\square] \textit{Ghi chú của bạn (đã cài đặt/tải env nào):} \underline{\hspace{10cm}}
+\end{tasklist}
+
+\subsection*{9. Baselines (6 hệ thống so sánh)}
+\begin{itemize}
+  \item \textbf{Unshielded} — policy diffusion gốc, không lọc.
+  \item \textbf{Conf-Thresh} — reject theo độ bất đồng thuận ensemble (proxy cho confidence).
+  \item \textbf{MPC-Filter} [33] — predictive safety filter, sửa tối thiểu action đầu qua constrained QP trên $\hat f$. \bridge{} gần nhất với nền tảng MPC/QP đã làm.
+  \item \textbf{CBF-Shield} [38],[39] — QP với hand-designed control barrier function.
+  \item \textbf{STL-Monitor} [53] — robustness STL trên 1 nominal rollout, không reachtube, không counterexample search.
+  \item \textbf{ShortStop (đề xuất)} — full pipeline P-R-C-S.
+\end{itemize}
+\begin{tasklist}
+  \item[\square] \textit{Ghi chú của bạn (đã code baseline nào):} \underline{\hspace{10cm}}
+\end{tasklist}
+
+\end{document}
