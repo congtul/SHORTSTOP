@@ -34,7 +34,7 @@
     \item Kết quả chính (Experiments/Results)
     \item Cái dễ / cái khó khi tái lập
     \item Vì sao đây là đóng góp mới và khó
-    \item 4 bài liên quan: mạnh/yếu so với ShortStop
+    \item Bài liên quan: 3 baseline thực tế (Table~II) + 3 bài bối cảnh
     \item Vị trí trong literature \& câu hỏi mở
 \end{itemize}
 \end{frame}
@@ -371,30 +371,20 @@ Không phải một khối riêng lẻ --- là việc lần đầu ghép \textbf
 \end{frame}
 
 %=====================================================================
-\section{4 bài báo liên quan}
+\section{Bài liên quan: baseline thực tế và bối cảnh}
 %=====================================================================
 
-\begin{frame}{Bài 1: SafeDiffuser (Xiao et al., ICLR 2025)}
-\textbf{Phương pháp}: nhúng CBF vào chính quá trình denoising --- sửa generator, không phải lọc hậu kiểm.
-\begin{columns}[T]
-\column{0.5\textwidth}
-\textbf{\good{Mạnh hơn ShortStop}}
+\begin{frame}{Nguyên tắc chọn bài (đã điều chỉnh)}
 \begin{itemize}
-    \item Không cần vòng lọc runtime riêng
-    \item Không cần $\hat f,\varepsilon$ tường minh
+    \item Ưu tiên truy ngược đúng \textbf{3 baseline được benchmark trong Table~II}: \texttt{MPC-Filter}~[33], \texttt{CBF-Shield}~[38,39], \texttt{STL-Monitor}~[53].
+    \item So với đúng bài baseline $\Rightarrow$ lập luận mạnh/yếu bám vào \emph{giới hạn phương pháp gốc}, không chỉ ``nghe liên quan''.
+    \item \alert{Lưu ý}: số liệu Table~II/III hiện là số \textbf{kỳ vọng/placeholder} (sẽ thay bằng số đo thật) $\Rightarrow$ phần so sánh dưới đây bám \emph{giới hạn cấu trúc}, không bám chênh lệch số cụ thể.
+    \item Sau 3 baseline, thêm 3 bài \emph{bối cảnh rộng hơn} (không benchmark trực tiếp): SafeDiffuser, MPM-STL, Path-Consistent.
 \end{itemize}
-\column{0.5\textwidth}
-\textbf{\bad{Yếu hơn ShortStop}}
-\begin{itemize}
-    \item Phải sửa/train lại sampler --- không dùng được với $\pi_\theta$ đã đóng băng
-    \item Không có bounded-time/all-time theorem
-    \item Không xử lý batch $K$ chunk
-\end{itemize}
-\end{columns}
 \end{frame}
 
-\begin{frame}{Bài 2: Predictive Safety Filter (Wabersich \& Zeilinger, 2021)}
-\textbf{Phương pháp}: MPC filter sửa tối thiểu 1 action qua constrained QP --- chính là baseline \texttt{MPC-Filter}.
+\begin{frame}{Baseline 1: MPC-Filter (Wabersich \& Zeilinger, 2021)}
+\textbf{Phương pháp gốc}: MPC filter sửa tối thiểu 1 action qua constrained QP --- chính là baseline \texttt{MPC-Filter}.
 \begin{columns}[T]
 \column{0.5\textwidth}
 \textbf{\good{Mạnh hơn ShortStop}}
@@ -403,71 +393,97 @@ Không phải một khối riêng lẻ --- là việc lần đầu ghép \textbf
     \item Chỉ sửa 1 action --- đơn giản khi model lồi
 \end{itemize}
 \column{0.5\textwidth}
-\textbf{\bad{Yếu hơn ShortStop}}
+\textbf{\bad{Giới hạn cấu trúc (từ bài gốc)}}
 \begin{itemize}
-    \item Violation $4.9\%$ vs $1.2\%$; precision $0.64$ vs $0.94$; latency chậm hơn ($12.4$ms)
-    \item Không xử lý batch chunk đa modal
+    \item Chỉ sửa 1 action, không có batch chunk $a_{t:t+H}$
+    \item Cần model optimal-control lồi/tractable
     \item Không có STL / đặc tả thời gian phong phú
 \end{itemize}
 \end{columns}
 \end{frame}
 
-\begin{frame}{Bài 3: Model Predictive Monitoring of STL (Yu et al., 2024)}
-\textbf{Phương pháp}: dùng model để tính feasible/reachable set, evaluate STL trên đó --- tiền lệ gần nhất của Eq.~(2).
+\begin{frame}{Baseline 2: CBF-Shield (Ames et al. 2017; Cheng et al. 2019)}
+\textbf{Phương pháp gốc}: QP tức thời ép $\dot h(x,u)\ge-\alpha(h(x))$ với $h(x)$ thiết kế tay --- chính là baseline \texttt{CBF-Shield}.
 \begin{columns}[T]
 \column{0.5\textwidth}
 \textbf{\good{Mạnh hơn ShortStop}}
 \begin{itemize}
-    \item Thiết lập lý thuyết STL-trên-reachable-set trước
+    \item QP tuyến tính, giải cực nhanh
+    \item Lý thuyết forward-invariance trưởng thành
+\end{itemize}
+\column{0.5\textwidth}
+\textbf{\bad{Giới hạn cấu trúc (từ bài gốc)}}
+\begin{itemize}
+    \item $h(x)$ phải thiết kế tay từng hình dạng vùng nguy hiểm
+    \item Chỉ sửa 1 input tức thời, không horizon $H{>}1$
+    \item Cần $f,g$ tường minh, control-affine
+    \item Không temporal-logic, không counterexample witness
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Baseline 3: STL-Monitor (Deshmukh et al., 2017)}
+\textbf{Phương pháp gốc}: tính robustness STL trực tuyến trên 1 tín hiệu quan sát --- nguồn trực tiếp của Eq.~(2), và là baseline \texttt{STL-Monitor}.
+\begin{columns}[T]
+\column{0.5\textwidth}
+\textbf{\good{Mạnh hơn ShortStop}}
+\begin{itemize}
+    \item Đệ quy hiệu quả, đã trưởng thành
     \item Tổng quát cho nhiều hệ cyber-physical
 \end{itemize}
 \column{0.5\textwidth}
-\textbf{\bad{Yếu hơn ShortStop}}
+\textbf{\bad{Giới hạn cấu trúc (từ bài gốc)}}
 \begin{itemize}
     \item Monitor \emph{bị động} --- không reject-and-repair
-    \item Không nhằm sampler ngẫu nhiên/đa modal
-    \item Không có counterexample-guided search
+    \item Tính trên 1 tín hiệu, không phải reachable set
+    \item Không xử lý batch $K$ chunk, không counterexample
 \end{itemize}
 \end{columns}
 \end{frame}
 
-\begin{frame}{Bài 4: Path-Consistent Safety Filtering (2025, đối thủ đồng thời)}
-\textbf{Phương pháp}: lọc hậu kiểm cho diffusion policy, giữ chunk nhất quán với phân phối đã học (path-consistency).
-\begin{columns}[T]
-\column{0.5\textwidth}
-\textbf{\good{Mạnh hơn ShortStop}}
-\begin{itemize}
-    \item Giải quyết trực diện rủi ro ``lệch phân phối'' khi sửa chunk
-    \item Tối ưu sâu cho riêng kiến trúc diffusion
-\end{itemize}
-\column{0.5\textwidth}
-\textbf{\bad{Yếu hơn ShortStop} (theo công bố công khai)}
-\begin{itemize}
-    \item Không thấy bounded-time/all-time/trade-off theorem
-    \item Không thấy counterexample-guided search tường minh
-    \item Chỉ nhắm diffusion, không tổng quát flow-matching
-\end{itemize}
-\end{columns}
-\vspace{4pt}
-\footnotesize \textit{Công trình đồng thời (2025) --- cần đọc full-text để so sánh định lượng công bằng.}
-\end{frame}
-
-\begin{frame}{Bảng so sánh tổng hợp}
+\begin{frame}{Bảng A --- 3 baseline thực tế (Table~II)}
 \begin{table}
 \centering\footnotesize
-\begin{tabular}{lcccc}
+\begin{tabular}{lccc}
 \toprule
-Tiêu chí & SafeDiffuser & MPC-Filter & MPM-STL & Path-Consistent \\
+Tiêu chí & MPC-Filter & CBF-Shield & STL-Monitor \\
 \midrule
-Sửa generator? & Có & Không & N/A & Không \\
-Reachability? & Không & Có & Có & Không rõ \\
-STL đầy đủ? & Không & Không & Có & Không rõ \\
-Counterexample? & Không & Không & Không & Không rõ \\
-Batch $K$ chunk? & Không & Không & Không & Không rõ \\
+Sửa/chọn & 1 action & 1 action & N/A (chỉ giám sát) \\
+Horizon & 1 bước & Tức thời & Không có (tín hiệu quan sát) \\
+STL đầy đủ? & Không & Không & Có (nguồn Eq.~2) \\
+Counterexample? & Không & Không & Không \\
+Batch $K$ chunk? & Không & Không & Không \\
 \bottomrule
 \end{tabular}
 \end{table}
-\centering \alert{ShortStop = giao điểm của cả 3 trục: post-hoc $\times$ reachability+STL $\times$ counterexample-guided.}
+Mỗi cột thiếu đúng 1--2 lớp trong P-R-C-S mà ShortStop bổ sung.
+\end{frame}
+
+\begin{frame}{Bối cảnh rộng hơn (không benchmark trực tiếp)}
+\begin{itemize}
+    \item \textbf{SafeDiffuser} (Xiao et al., ICLR 2025): sửa/train lại sampler, không dùng được với $\pi_\theta$ đã đóng băng; không bounded-time/all-time theorem; không batch $K$ chunk.
+    \item \textbf{MPM-STL} (Yu et al., 2024): tiền lệ gần nhất của Eq.~(2) --- STL trên reachable/feasible set --- nhưng là monitor bị động, không reject-and-repair, không nhắm sampler đa modal.
+    \item \textbf{Path-Consistent Filtering} (Römer et al., arXiv:2511.06385, chấp nhận ICRA 2026 --- đồng thời với ShortStop): giữ chunk nhất quán phân phối đã học; không thấy bounded-time/all-time theorem hay counterexample-guided search tường minh theo mô tả công khai; chỉ nhắm diffusion, không tổng quát flow-matching.
+\end{itemize}
+\footnotesize\textit{Cả 3 bài này không có số liệu head-to-head với ShortStop --- dùng để định vị literature, không để khẳng định hơn/kém bằng số.}
+\end{frame}
+
+\begin{frame}{Bảng B --- 3 bài bối cảnh (không benchmark)}
+\begin{table}
+\centering\footnotesize
+\begin{tabular}{lccc}
+\toprule
+Tiêu chí & SafeDiffuser & MPM-STL & Path-Consistent \\
+\midrule
+Sửa generator? & Có & N/A & Không \\
+Reachability? & Không & Có & Không rõ \\
+STL đầy đủ? & Không & Có & Không rõ \\
+Counterexample? & Không & Không & Không rõ \\
+Batch $K$ chunk? & Không & Không & Không rõ \\
+\bottomrule
+\end{tabular}
+\end{table}
+\centering \alert{ShortStop = giao điểm của cả 3 trục: post-hoc $\times$ reachability+STL $\times$ counterexample-guided --- đúng với cả baseline thật lẫn bối cảnh rộng hơn.}
 \end{frame}
 
 %=====================================================================

@@ -94,7 +94,7 @@ Tài liệu này trả lời sâu 5 câu hỏi về bài báo \st{} (\emph{Count
   \item \textbf{Hướng hoạt động} --- insight cốt lõi biến một bài toán bất khả thi (verify hình thức một generative policy) thành một bài toán khả thi (verify hậu quả ngắn hạn của một chunk hành động cụ thể).
   \item \textbf{Cách hiện thực} --- toán học và thuật toán chi tiết của vòng lặp P-R-C-S, cùng bộ ba định lý an toàn.
   \item \textbf{Cái dễ / cái khó} khi hiểu và tái lập bài báo, và \textbf{vì sao đây là một đóng góp mới/khó} chứ không phải một sự ghép nối tầm thường của các kỹ thuật đã biết.
-  \item \textbf{4 bài báo liên quan} --- xuất phát từ danh sách reference gốc của \st{} rồi mở rộng ra literature 2024--2025, phân tích điểm mạnh/yếu của từng bài so với \st{}.
+  \item \textbf{Các bài báo liên quan} --- ưu tiên truy ngược đúng 3 baseline được benchmark trong Table~II (MPC-Filter, CBF-Shield, STL-Monitor), phân tích mạnh/yếu dựa trên giới hạn phương pháp gốc; sau đó mở rộng thêm 3 bài cùng chủ đề (literature 2023--2025, không benchmark trực tiếp) để định vị rộng hơn.
 \end{enumerate}
 Nội dung được tổng hợp trực tiếp từ văn bản đầy đủ của \st{} (\texttt{main (3).txt/pdf}, gồm Sec.~I--IX và Phụ lục A--B), đối chiếu với \emph{ShortStop\_Research\_Plan.tex}, và bổ sung bằng tra cứu học thuật (arXiv/Semantic Scholar) cho phần related-work mở rộng.
 
@@ -307,70 +307,129 @@ Cái mới không nằm ở bất kỳ khối riêng lẻ (reachability, STL, CE
 Một phần "mới" của bài báo (STL robustness tính trên reachtube/predicted set thay vì một quỹ đạo nominal) \emph{đã có tiền lệ gần} trong literature model-predictive-monitoring (xem \S\ref{sec:related}, bài Yu et al.) công bố 2022--2024, dùng đúng ý tưởng "dùng model để dự đoán reachable set rồi evaluate STL trên đó, thay vì trên 1 trajectory". Sự khác biệt thực sự của ShortStop với dòng này là: (a) áp dụng cho \emph{lựa chọn hành động của một generative sampler} chứ không phải \emph{giám sát bị động} một hệ đã biết luật điều khiển; và (b) đóng thêm một vòng lặp CEGIS chủ động (reject-and-\emph{repair}), không chỉ certify/falsify. Nhìn nhận đúng mức độ mới này (kết hợp + áp dụng mới, không phải phát minh nguyên lý STL-trên-reachable-set) là quan trọng để đánh giá công bằng.
 
 %=====================================================================
-\section{Bốn bài báo liên quan --- điểm mạnh/yếu so với ShortStop}\label{sec:related}
+\section{Các bài báo liên quan --- baseline thực tế và bối cảnh rộng hơn}\label{sec:related}
 %=====================================================================
-Bốn bài được chọn theo đúng yêu cầu: bắt đầu từ reference gốc của ShortStop (SafeDiffuser [24], MPC predictive safety filter [33], STL robust online monitoring [53]), sau đó tìm rộng ra literature 2022--2025 (model predictive monitoring cho STL; và một bài đối thủ trực tiếp công bố sau ShortStop's reference list, 2025) để xem ai đang cạnh tranh/tiếp nối ý tưởng gần nhất.
+\textbf{Nguyên tắc chọn (đã điều chỉnh)}: thay vì chỉ tìm bài "nghe liên quan" theo chủ đề chung, phần dưới \textbf{ưu tiên truy ngược đúng nguồn gốc phương pháp của 3 baseline mà chính ShortStop dùng để so sánh định lượng trong Table~II} --- \texttt{MPC-Filter} [33], \texttt{CBF-Shield} [38],[39], \texttt{STL-Monitor} [53]. Lý do: so sánh với \emph{đúng bài baseline được benchmark} cho một lập luận "mạnh/yếu" \textbf{đáng giá} hơn nhiều so với so sánh với các bài chỉ "cùng chủ đề" nhưng chưa từng đối đầu trực tiếp --- ta có thể chỉ thẳng vào \emph{giới hạn cấu trúc trong chính bài gốc của baseline} để giải thích vì sao ShortStop cần tồn tại, thay vì chỉ nói "bài kia không làm X, bài này có làm X" một cách rời rạc.
 
-\subsection{Bài 1 --- SafeDiffuser (Xiao, Wang, Gan, Rus)}
+\textbf{Lưu ý về số liệu}: các con số Table~II/III hiện tại trong bản thảo ShortStop là số \emph{kỳ vọng/placeholder} (tác giả xác nhận sẽ thay bằng số đo thật sau khi chạy đầy đủ thực nghiệm) --- vì vậy \S\ref{sec:related} dưới đây \textbf{cố tình lập luận trên giới hạn phương pháp/cấu trúc} của từng baseline gốc (điều không đổi dù số liệu có thay đổi), chỉ nhắc số Table~II như một tham chiếu định hướng (order-of-magnitude), không phải bằng chứng quyết định.
+
+Sau 3 baseline thực tế, \S\ref{sec:related-context} giữ lại 3 bài \emph{cùng hướng đề tài} (an toàn/giám sát cho policy sinh hoặc hệ có model) nhưng \textbf{không} được ShortStop benchmark trực tiếp (không có số liệu head-to-head) --- vẫn hữu ích để định vị ShortStop trong bức tranh literature rộng hơn, nhưng không dùng để khẳng định hơn/kém bằng số.
+
+\subsection{Baseline 1 --- MPC-Filter: Predictive Safety Filter (Wabersich \& Zeilinger, 2021)}
+\textbf{Nguồn}: \emph{"A predictive safety filter for learning-based control of constrained nonlinear dynamical systems"}, Automatica 129:109597 (2021)~\cite{wabersich2021predictive}. Reference [33] --- chính là baseline \texttt{MPC-Filter} trong Table~II của ShortStop.
+
+\textbf{Phương pháp gốc}: biến một hệ có ràng buộc thành một hệ "không ràng buộc an toàn" bằng một bộ lọc MPC — nhận input đề xuất từ policy RL, và tối thiểu-hoá sửa nó qua một constrained optimal-control problem dựa trên data-driven model, cập nhật liên tục một "safety policy".
+
+\textbf{Điểm mạnh so với ShortStop}: (a) lý thuyết recursive-feasibility rất trưởng thành (kế thừa MPC cổ điển~\cite{mayne2000constrained}); (b) chỉ cần sửa tối thiểu 1 action, chi phí tính toán/độ phức tạp triển khai thường thấp hơn khi model tuyến tính/lồi; (c) không cần một sampler đề xuất nhiều candidate — hoạt động tốt với policy sinh 1 action/bước.
+
+\textbf{Giới hạn cấu trúc (từ chính bài gốc)}: (a) chỉ tác động lên \emph{một} action tại một thời điểm, không có khái niệm batch chunk temporal-extended $a_{t:t+H}$; (b) cần một model optimal-control tractable (thường tuyến tính/lồi hoá) để QP giải được — kém phù hợp khi hành vi generative đa modal (nhiều chế độ hành động khả dĩ mà một bài toán tối ưu lồi đơn không nắm bắt được cùng lúc); (c) không có STL hay đặc tả thời gian phong phú, chỉ constraint set-invariance dạng chuẩn — không phân biệt được avoidance vs. progress vs. timing. Table~II của ShortStop (số kỳ vọng) gợi ý thêm: violation/latency của MPC-Filter nhạy với việc phải giải lại QP cho từng input, thay vì tái dùng một gradient counterexample đã tính.
+
+\textbf{Vì sao thúc đẩy thiết kế ShortStop}: đúng giới hạn (a) là lý do ShortStop chọn/sửa cả một \emph{batch} $K$ chunk thay vì 1 input; giới hạn (b)+(c) là lý do reachtube + STL robustness-to-go được chọn thay cho một mô hình optimal-control lồi tường minh.
+
+\subsection{Baseline 2 --- CBF-Shield: Control Barrier Function QP (Ames et al. 2017; Cheng et al. 2019)}
+\textbf{Nguồn}: A. D. Ames, X. Xu, J. W. Grizzle, P. Tabuada, \emph{"Control Barrier Function Based Quadratic Programs for Safety Critical Systems,"} IEEE Trans.\ Automatic Control 62(8):3861--3876, 2017~\cite{ames2017cbf} --- reference [38]; cùng R. Cheng, G. Orosz, R. M. Murray, J. W. Burdick, \emph{"End-to-End Safe Reinforcement Learning through Barrier Functions for Safety-Critical Continuous Control Tasks,"} AAAI 2019~\cite{cheng2019end} --- reference [39], mở rộng CBF-QP để lồng vào một policy RL. Đây chính là nguồn của baseline \texttt{CBF-Shield} trong Table~II.
+
+\textbf{Phương pháp gốc}: với một hệ control-affine $\dot x = f(x)+g(x)u$ và một hàm rào cản (barrier function) $h(x)$ \emph{thiết kế tay} định nghĩa tập an toàn $C=\{x: h(x)\ge 0\}$, CBF-QP giải một quadratic program tại \emph{mỗi thời điểm}: tìm $u$ gần nhất với input mong muốn $u_{\text{nom}}$ (từ một controller/policy khác) sao cho $\dot h(x,u)\ge -\alpha(h(x))$ (điều kiện forward-invariance, $\alpha$ là hàm lớp-$\mathcal K$) --- một ràng buộc \emph{tuyến tính} trên $u$, nên QP giải rất nhanh. Cheng et al.\ (2019) ghép framework này lên trên một policy RL model-free, biến CBF-QP thành một "safety layer" cuối cùng trước khi input ra actuator.
+
+\textbf{Giới hạn cấu trúc (từ chính bài gốc, không phải từ Table~II của ShortStop)}:
+\begin{itemize}
+  \item \textbf{Hàm rào cản $h(x)$ phải thiết kế tay cho từng hình dạng vùng nguy hiểm cụ thể} --- bài gốc không đề xuất cách tự động hoá; với nhiều vật cản/hình dạng bất kỳ, phải tự ghép nhiều $h_i(x)$ (ví dụ min-of-barriers), dễ vỡ tính khả vi của QP.
+  \item \textbf{Chỉ sửa \emph{một} input tại \emph{một} thời điểm} --- là một bộ lọc tức thời (instantaneous), không có khái niệm chunk hay horizon $H>1$; muốn nhìn trước nhiều bước phải tự ghép thêm một lớp MPC bên ngoài mà bài gốc không làm.
+  \item \textbf{Cần $f(x),g(x)$ tường minh và hệ phải control-affine} --- không tương thích trực tiếp với một sampler sinh xác suất/đa modal như diffusion policy, nơi "input" là một phân phối trên cả chuỗi hành động, không phải một vector điều khiển đơn nhất.
+  \item \textbf{Không có khái niệm temporal-logic hay counterexample} --- $h(x)\ge 0$ chỉ là ràng buộc set-invariance đơn giản, không biểu diễn được đặc tả phức hợp (avoidance + progress + timing) như STL $\phi$; QP tự tìm nghiệm khả thi gần nhất, không tách bạch "vi phạm ở đâu" khỏi "sửa thế nào" bằng một witness cụ thể.
+\end{itemize}
+
+\textbf{Vì sao thúc đẩy thiết kế ShortStop}: đúng 4 giới hạn trên là lý do 3 lớp (R)+(C)+(S) của ShortStop tách biệt nhau: reachtube thay cho một $h(x)$ thiết kế tay (tổng quát hoá hình dạng bất kỳ qua Minkowski sum), horizon $H$ thay vì tức thời, và counterexample witness $x^\star$ (Eq.~3) thay vì một QP đơn thuần (vừa chứng minh reject vừa cho hướng sửa, thay vì chỉ tìm nghiệm khả thi gần nhất). Baseline \texttt{CBF-Shield} trong Table~II là bản hiện thực hoá "tay" của đúng phương pháp gốc này, dùng để đo cái giá phải trả khi thiếu 3 lớp trên.
+
+\subsection{Baseline 3 --- STL-Monitor: Robust Online Monitoring of STL (Deshmukh et al. 2017)}
+\textbf{Nguồn}: J. V. Deshmukh, A. Donzé, S. Ghosh, X. Jin, G. Juniwal, S. A. Seshia, \emph{"Robust Online Monitoring of Signal Temporal Logic,"} Formal Methods in System Design, 2017~\cite{deshmukh2017robust} --- reference [53]. Đây chính là nguồn của baseline \texttt{STL-Monitor} trong Table~II, và cũng là nguồn trực tiếp của công thức robustness đệ quy mà ShortStop tái sử dụng ở Eq.~(2).
+
+\textbf{Phương pháp gốc}: một thuật toán tính \emph{robustness} (độ thoả mãn định lượng, không chỉ true/false) của một công thức STL $\phi$ \emph{trực tuyến} --- khi tín hiệu $\xi$ đến từng mẫu một theo thời gian thực, thuật toán cập nhật dần bound trên/dưới của $\rho(\phi,\xi)$ mà không cần chờ quan sát hết toàn bộ tín hiệu, dùng đệ quy hiệu quả trên cây cú pháp STL --- áp trên \emph{một quỹ đạo/tín hiệu quan sát được cụ thể}, không phải trên một tập trạng thái khả dĩ (reachable set).
+
+\textbf{Giới hạn cấu trúc (từ chính bài gốc)}:
+\begin{itemize}
+  \item \textbf{Thuần tuý là một \emph{monitor bị động}} --- chỉ trả lời "công thức đang được thoả mãn tới mức nào", không có khái niệm đề xuất/chọn/sửa hành động; không đóng vòng lặp điều khiển.
+  \item \textbf{Tính trên tín hiệu đã biết/quan sát được, không phải trên một tập trạng thái tương lai} --- nếu dùng để "dự đoán" phải giả định trước một quỹ đạo nominal duy nhất, không tự nhiên mở rộng sang "robustness trên cả một reachtube" như Eq.~(2) của ShortStop --- đây chính là khoảng trống mà cả ShortStop và bài Yu et al.\ (\S\ref{sec:related-context}) đều nhắm vào, nhưng bài gốc Deshmukh et al.\ không làm.
+  \item \textbf{Không xử lý một tập $K$ candidate chunk} --- theo dõi \emph{một} tín hiệu; khi ghép làm baseline cho generative policy (như Table~II của ShortStop làm), phải tự bổ sung phần "chọn 1 trong $K$" bên ngoài phạm vi bài gốc.
+  \item \textbf{Không có counterexample-guided repair} --- chỉ báo cáo robustness, không tìm witness cụ thể để định hướng sửa hành động.
+\end{itemize}
+
+\textbf{Vì sao thúc đẩy thiết kế ShortStop}: bài gốc cung cấp đúng "nửa Certify" của vòng lặp P-R-C-S (và là nguồn công thức robustness đệ quy) nhưng dừng ở đó --- ShortStop bổ sung phần "Reach" (robustness trên cả tube thay vì 1 tín hiệu) và "Select/Repair" (đóng vòng chủ động thay vì chỉ báo cáo). Baseline \texttt{STL-Monitor} trong Table~II dùng đúng công thức monitor gốc nhưng chỉ trên 1 rollout nominal của $\hat f$ --- để đo phần giá trị tăng thêm khi certify cả tube + counterexample search mang lại.
+
+%=====================================================================
+\subsection{Bối cảnh literature rộng hơn (không benchmark trực tiếp)}\label{sec:related-context}
+%=====================================================================
+Ba bài dưới đây \textbf{không} nằm trong Table~II của ShortStop --- không có số liệu head-to-head, nên phần "mạnh/yếu" ở đây mang tính \emph{định tính, dựa trên mô tả công khai của mỗi bài}, không phải bằng chứng thực nghiệm trực tiếp.
+
+\subsubsection{SafeDiffuser (Xiao, Wang, Gan, Rus)}
 \textbf{Nguồn}: \emph{"SafeDiffuser: Safe Planning with Diffusion Probabilistic Models"}, arXiv:2306.00148 (2023), ICLR 2025~\cite{xiao2023safediffuser}. Đây là reference [24] trong ShortStop.
 
 \textbf{Phương pháp}: nhúng control barrier functions trực tiếp vào quá trình denoising của diffusion model, tạo ra "finite-time diffusion invariance" --- nói cách khác, \emph{sửa chính sampler} để các bước khử nhiễu trung gian bị ràng buộc ở lại trong tập an toàn, thay vì lọc output sau khi sinh xong. Thử nghiệm trên maze path generation, legged locomotion, và 3D manipulation.
 
 \textbf{Điểm mạnh so với ShortStop}: (a) không cần vòng lọc runtime riêng biệt --- an toàn được "dệt" vào chính quá trình sinh, nên không có overhead tách rời kiểu Reach+CE-search; (b) không cần một mô hình động lực $\hat f,\varepsilon$ tường minh ở runtime vì ràng buộc được áp trong không gian denoising.
 
-\textbf{Điểm yếu so với ShortStop}: (a) phải \emph{sửa/huấn luyện lại} sampler --- không áp dụng được cho một $\pi_\theta$ đã đóng băng (frozen, đã deploy) như ShortStop yêu cầu; (b) guarantee gắn với xấp xỉ của quá trình diffusion invariance, không phải một per-decision certificate độc lập với việc training có đúng không; (c) không xử lý một batch $K$ chunk với lựa chọn/so sánh task-progress --- an toàn và tính task-optimal bị trộn vào cùng một quá trình sinh, khó tách bạch "cái gì làm rớt task success vì lý do an toàn"; (d) không có bằng chứng loại bounded-time/all-time theorem tách biệt theo kiểu ShortStop, cũng không có counterexample-guided repair tường minh.
+\textbf{Điểm yếu so với ShortStop}: (a) phải \emph{sửa/huấn luyện lại} sampler --- không áp dụng được cho một $\pi_\theta$ đã đóng băng (frozen, đã deploy) như ShortStop yêu cầu; (b) guarantee gắn với xấp xỉ của quá trình diffusion invariance, không phải một per-decision certificate độc lập với việc training có đúng không; (c) không xử lý một batch $K$ chunk với lựa chọn/so sánh task-progress; (d) không có bằng chứng loại bounded-time/all-time theorem tách biệt theo kiểu ShortStop, cũng không có counterexample-guided repair tường minh.
 
-\subsection{Bài 2 --- Predictive Safety Filter (Wabersich \& Zeilinger)}
-\textbf{Nguồn}: \emph{"A predictive safety filter for learning-based control of constrained nonlinear dynamical systems"}, Automatica 129:109597 (2021)~\cite{wabersich2021predictive}. Reference [33] --- chính là baseline \texttt{MPC-Filter} trong Table~II của ShortStop.
-
-\textbf{Phương pháp}: biến một hệ có ràng buộc thành một hệ "không ràng buộc an toàn" bằng một bộ lọc MPC — nhận input đề xuất từ policy RL, và tối thiểu-hoá sửa nó qua một constrained optimal-control problem dựa trên data-driven model, cập nhật liên tục một "safety policy".
-
-\textbf{Điểm mạnh so với ShortStop}: (a) lý thuyết recursive-feasibility rất trưởng thành (kế thừa MPC cổ điển~\cite{mayne2000constrained}); (b) chỉ cần sửa tối thiểu 1 action, chi phí tính toán/độ phức tạp triển khai thường thấp hơn khi model tuyến tính/lồi; (c) không cần một sampler đề xuất nhiều candidate — hoạt động tốt với policy sinh 1 action/bước.
-
-\textbf{Điểm yếu so với ShortStop} (theo đúng số liệu Table~II): violation cao hơn ShortStop $4$--$5\times$ ($4.9\%$ vs $1.2\%$), success thấp hơn ($65.7\%$ vs $68.4\%$), precision thấp hơn nhiều ($0.64$ vs $0.94$), và latency \emph{chậm hơn} ($12.4$ms vs $8.9$ms) — vì QP phải giải cho mỗi input thay vì tái sử dụng gradient counterexample. Về cấu trúc: (a) chỉ tác động lên \emph{một} action, không có khái niệm batch chunk temporal-extended; (b) cần một model optimal-control tractable (thường tuyến tính/lồi hoá) — kém phù hợp khi hành vi generative đa modal (nhiều chế độ hành động khả dĩ mà một QP đơn không nắm bắt); (c) không có STL hay đặc tả thời gian phong phú, chỉ constraint set-invariance dạng chuẩn.
-
-\subsection{Bài 3 --- Model Predictive Monitoring of STL (Yu, Dong, Yin, Li)}
+\subsubsection{Model Predictive Monitoring of STL (Yu, Dong, Yin, Li)}
 \textbf{Nguồn}: \emph{"Model Predictive Monitoring of Dynamical Systems for Signal Temporal Logic Specifications"}, arXiv:2209.12493, Automatica (2024)~\cite{yu2024modelpredictive}. Đây \emph{không} nằm trong reference gốc của ShortStop nhưng là "tổ tiên" gần nhất về mặt ý tưởng của Sec.~III.E (STL robustness-to-go trên reachtube) — tìm được bằng cách mở rộng từ nhánh II.F (robust online STL monitoring [53]) sang literature 2022--2024.
 
 \textbf{Phương pháp}: giám sát online một STL formula bằng cách, tại mỗi bước, dùng mô hình động lực \emph{đã biết} để tính \emph{feasible set} (tập trạng thái đạt được dưới control input chưa biết), rồi evaluate STL trên tập đó — cho phép "falsify hoặc certify đặc tả \emph{trước} so với thuật toán không dùng model", chứ không chỉ đánh giá trên quỹ đạo quan sát được tới hiện tại.
 
 \textbf{Điểm mạnh so với ShortStop}: (a) đây chính xác là ý tưởng "STL trên reachable set thay vì trên 1 trajectory" mà ShortStop dùng ở Eq.~2 — nghĩa là bài này đã thiết lập \emph{lý thuyết giám sát} nền tảng trước, với phân tích chặt hơn về early-detection; (b) là một bài monitoring "thuần", tổng quát hơn cho nhiều hệ cyber-physical, không giới hạn ở robot manipulation.
 
-\textbf{Điểm yếu so với ShortStop}: (a) đây là một \textbf{monitor bị động} — phát hiện vi phạm sớm, nhưng không đóng vòng lặp \emph{hành động}: không có khái niệm reject-and-\emph{repair}, không chọn giữa nhiều candidate, không tích hợp vào một policy loop; (b) không nhằm vào generative/stochastic sampler cao chiều — giả định luật điều khiển \emph{chưa biết nhưng đơn nhất} tại mỗi bước, không phải một phân phối đa modal trên hành động; (c) không có counterexample-guided search kiểu CEGIS để vừa chứng minh reject vừa cho hướng sửa — chỉ dừng ở "chứng nhận/bác bỏ". Nói cách khác: bài 3 cung cấp \emph{nửa đầu} (Reach + Certify) của vòng lặp P-R-C-S, và ShortStop identify đúng phần còn thiếu (Select/Repair chủ động bằng CEGIS) là chỗ tạo ra phần lớn lợi ích thực nghiệm (ablation Table~III: CE-search + Repair đóng góp lớn nhất).
+\textbf{Điểm yếu so với ShortStop}: (a) đây là một \textbf{monitor bị động} — phát hiện vi phạm sớm, nhưng không đóng vòng lặp \emph{hành động}: không có khái niệm reject-and-\emph{repair}, không chọn giữa nhiều candidate, không tích hợp vào một policy loop; (b) không nhằm vào generative/stochastic sampler cao chiều — giả định luật điều khiển \emph{chưa biết nhưng đơn nhất} tại mỗi bước, không phải một phân phối đa modal trên hành động; (c) không có counterexample-guided search kiểu CEGIS để vừa chứng minh reject vừa cho hướng sửa — chỉ dừng ở "chứng nhận/bác bỏ". Nói cách khác: bài này cung cấp \emph{nửa đầu} (Reach + Certify) của vòng lặp P-R-C-S, và ShortStop identify đúng phần còn thiếu (Select/Repair chủ động bằng CEGIS) là chỗ tạo ra phần lớn lợi ích thực nghiệm (ablation Table~III: CE-search + Repair đóng góp lớn nhất).
 
-\subsection{Bài 4 --- Path-Consistent Safety Filtering for Diffusion Policies (2025, đối thủ trực tiếp/đồng thời)}
-\textbf{Nguồn}: \emph{"From Demonstrations to Safe Deployment: Path-Consistent Safety Filtering for Diffusion Policies"}, arXiv:2511.06385 (2025)~\cite{pathconsistent2025}. Tìm được khi mở rộng tra cứu ra khỏi reference gốc, tìm bài \emph{gần nhất về mục tiêu} (an toàn cho diffusion policy tại runtime) công bố sau ShortStop.
+\subsubsection{Path-Consistent Safety Filtering for Diffusion Policies (2025, đồng thời)}
+\textbf{Nguồn}: R. Römer, J. Balletshofer, J. Thumm, M. Pavone, A. P. Schoellig, M. Althoff, \emph{"From Demonstrations to Safe Deployment: Path-Consistent Safety Filtering for Diffusion Policies"}, arXiv:2511.06385 (2025), chấp nhận tại ICRA 2026~\cite{pathconsistent2025}. Tìm được khi mở rộng tra cứu ra khỏi reference gốc, tìm bài \emph{gần nhất về mục tiêu} (an toàn cho diffusion policy tại runtime) công bố sau ShortStop.
 
 \textbf{Phương pháp}: một bộ lọc an toàn hậu kiểm (post-hoc) cho diffusion policy, giữ "path-consistency" — nghĩa là chunk sau khi lọc vẫn nhất quán với phân phối mà diffusion model đã học, tránh việc sửa quá tay khiến hành động rời khỏi phân phối huấn luyện. Hoạt động như một wrapper tương thích với kiến trúc diffusion-policy bất kỳ.
 
-\textbf{Điểm mạnh so với ShortStop}: (a) mục tiêu "path-consistency" giải quyết trực diện một rủi ro mà ShortStop chỉ giảm nhẹ gián tiếp qua trust region $\delta$ ở Eq.~4 — nếu bước sửa của ShortStop đẩy chunk quá xa khỏi phân phối $\pi_\theta$, hành vi có thể trở nên bất thường dù vẫn "an toàn" theo nghĩa hình học; bài 4 đặt việc giữ tính hợp lý theo phân phối lên làm mục tiêu chính, không phải ràng buộc phụ; (b) cùng nhắm đúng vào diffusion policy (không tổng quát hoá cho flow-matching như ShortStop), nên có thể tối ưu sâu hơn cho đặc thù kiến trúc denoiser.
+\textbf{Điểm mạnh so với ShortStop}: (a) mục tiêu "path-consistency" giải quyết trực diện một rủi ro mà ShortStop chỉ giảm nhẹ gián tiếp qua trust region $\delta$ ở Eq.~4 — nếu bước sửa của ShortStop đẩy chunk quá xa khỏi phân phối $\pi_\theta$, hành vi có thể trở nên bất thường dù vẫn "an toàn" theo nghĩa hình học; bài này đặt việc giữ tính hợp lý theo phân phối lên làm mục tiêu chính, không phải ràng buộc phụ; (b) cùng nhắm đúng vào diffusion policy (không tổng quát hoá cho flow-matching như ShortStop), nên có thể tối ưu sâu hơn cho đặc thù kiến trúc denoiser.
 
-\textbf{Điểm yếu so với ShortStop} (dựa trên các mô tả công khai — cần đọc full-text để xác nhận chi tiết định lượng): (a) không thấy công bố một bộ ba định lý dạng bounded-time / all-time / conservatism-horizon trade-off tương ứng Thm.~1/Cor.~1/Prop.~1 của ShortStop — nghĩa là guarantee có vẻ dừng ở mức "constraint satisfaction" hơn là một chuỗi chứng minh lượng hoá được sự đánh đổi theo horizon; (b) không thấy cơ chế counterexample-guided search tường minh (tìm witness cụ thể trong reachable set để vừa chứng minh reject vừa cho hướng sửa) — có vẻ nghiêng về ràng buộc/tối ưu trực tiếp trên trajectory hơn là một vòng CEGIS; (c) chỉ nhắm diffusion policy, còn ShortStop tuyên bố tổng quát cho \emph{bất kỳ} generative chunk-proposer kể cả flow-matching (đã thử ablation). \emph{Ghi chú khách quan}: đây là công trình \textbf{đồng thời/gần đồng thời} với ShortStop (cùng năm 2025, ShortStop nộp ICRA 2026) — nên xem là bằng chứng cho thấy "an toàn hậu kiểm cho diffusion policy" đang là một hướng nóng, chứ không dùng để khẳng định chắc chắn ShortStop "hơn" về mọi mặt mà không đọc kỹ full-text của bài 4.
+\textbf{Điểm yếu so với ShortStop} (dựa trên các mô tả công khai — cần đọc full-text để xác nhận chi tiết định lượng): (a) không thấy công bố một bộ ba định lý dạng bounded-time / all-time / conservatism-horizon trade-off tương ứng Thm.~1/Cor.~1/Prop.~1 của ShortStop — nghĩa là guarantee có vẻ dừng ở mức "constraint satisfaction" hơn là một chuỗi chứng minh lượng hoá được sự đánh đổi theo horizon; (b) không thấy cơ chế counterexample-guided search tường minh (tìm witness cụ thể trong reachable set để vừa chứng minh reject vừa cho hướng sửa) — có vẻ nghiêng về ràng buộc/tối ưu trực tiếp trên trajectory hơn là một vòng CEGIS; (c) chỉ nhắm diffusion policy, còn ShortStop tuyên bố tổng quát cho \emph{bất kỳ} generative chunk-proposer kể cả flow-matching (đã thử ablation). \emph{Ghi chú khách quan}: đây là công trình \textbf{đồng thời} với ShortStop --- cả hai cùng được chấp nhận ICRA 2026 --- nên xem là bằng chứng cho thấy "an toàn hậu kiểm cho diffusion policy" đang là một hướng nóng, chứ không dùng để khẳng định chắc chắn ShortStop "hơn" về mọi mặt mà không đọc kỹ full-text của bài này.
 
 \subsection{Bảng tổng hợp so sánh}
+\textbf{Bảng A --- 3 baseline thực tế (dùng trong Table~II của ShortStop)}: so sánh dựa trên giới hạn phương pháp gốc, không phải chênh lệch số Table~II (số kỳ vọng/placeholder).
 \begin{table}[H]
 \centering\small
-\begin{tabularx}{\textwidth}{@{}l X X X X@{}}
+\begin{tabularx}{\textwidth}{@{}l X X X@{}}
 \toprule
-Tiêu chí & SafeDiffuser~\cite{xiao2023safediffuser} & MPC-Filter~\cite{wabersich2021predictive} & MPM-STL~\cite{yu2024modelpredictive} & Path-Consistent~\cite{pathconsistent2025} \\
+Tiêu chí & MPC-Filter~\cite{wabersich2021predictive} & CBF-Shield~\cite{ames2017cbf,cheng2019end} & STL-Monitor~\cite{deshmukh2017robust} \\
 \midrule
-Sửa generator? & Có (nhúng CBF vào denoiser) & Không & N/A (không có generator) & Không (post-hoc) \\
-Đối tượng bảo vệ & 1 trajectory sinh ra & 1 action & 1 tín hiệu quan sát & 1 chunk diffusion \\
-Dùng reachability? & Không (invariance trong denoising) & Có (rollout dự đoán) & Có (feasible/reachable set) & Không rõ (path-consistency, không phải tube) \\
-STL / temporal spec? & Không & Không & Có (STL đầy đủ) & Không rõ \\
-Counterexample-guided? & Không & Không & Không (monitor thuần) & Không rõ \\
-Guarantee chính & Diffusion invariance (soft) & Recursive feasibility & Sound/early falsify-certify & Constraint satisfaction \\
-Batch $K$ chunk + chọn? & Không & Không (1 input) & Không & Không rõ \\
+Đối tượng sửa/chọn & 1 action & 1 action & N/A (chỉ giám sát) \\
+Horizon & 1 bước (MPC re-plan mỗi bước) & Tức thời (instantaneous) & Tín hiệu quan sát được, không có horizon tương lai \\
+Cần model tường minh? & Có (optimal-control tractable) & Có ($f,g$ control-affine) & Không cần model để monitor (nhưng cần nếu muốn dự đoán) \\
+STL / temporal spec? & Không (set-invariance) & Không (set-invariance, $h(x)\ge0$) & Có (STL đầy đủ, nguồn của Eq.~2) \\
+Counterexample-guided? & Không & Không & Không (monitor thuần, không repair) \\
+Batch $K$ chunk + chọn? & Không & Không & Không \\
 \bottomrule
 \end{tabularx}
-\caption{So sánh 4 bài liên quan với cấu trúc P-R-C-S + 3-định-lý của ShortStop. "Không rõ" = thông tin không xác nhận được từ tóm tắt công khai, cần đọc full-text.}
+\caption{3 baseline có benchmark trực tiếp trong Table~II. Mỗi cột thiếu đúng 1--2 lớp trong P-R-C-S mà ShortStop bổ sung.}
+\end{table}
+
+\textbf{Bảng B --- 3 bài bối cảnh rộng hơn (\S\ref{sec:related-context}, không benchmark trực tiếp)}:
+\begin{table}[H]
+\centering\small
+\begin{tabularx}{\textwidth}{@{}l X X X@{}}
+\toprule
+Tiêu chí & SafeDiffuser~\cite{xiao2023safediffuser} & MPM-STL~\cite{yu2024modelpredictive} & Path-Consistent~\cite{pathconsistent2025} \\
+\midrule
+Sửa generator? & Có (nhúng CBF vào denoiser) & N/A (không có generator) & Không (post-hoc) \\
+Đối tượng bảo vệ & 1 trajectory sinh ra & 1 tín hiệu quan sát & 1 chunk diffusion \\
+Dùng reachability? & Không (invariance trong denoising) & Có (feasible/reachable set) & Không rõ (path-consistency, không phải tube) \\
+STL / temporal spec? & Không & Có (STL đầy đủ) & Không rõ \\
+Counterexample-guided? & Không & Không (monitor thuần) & Không rõ \\
+Batch $K$ chunk + chọn? & Không & Không & Không rõ \\
+\bottomrule
+\end{tabularx}
+\caption{3 bài cùng chủ đề nhưng không có số liệu head-to-head với ShortStop. "Không rõ" = thông tin không xác nhận được từ tóm tắt công khai, cần đọc full-text.}
 \end{table}
 
 %=====================================================================
 \section{Tổng kết vị trí của ShortStop và câu hỏi còn mở}\label{sec:conclusion}
 %=====================================================================
 \subsection{Vị trí trong bức tranh literature}
-Đặt cạnh 4 bài trên, ShortStop chiếm một điểm khá đặc thù: nó là bài \emph{duy nhất} trong nhóm này (a) \textbf{không sửa generator} (như MPC-Filter, MPM-STL), (b) \textbf{có đặc tả STL phong phú trên cả tube} (như MPM-STL, khác SafeDiffuser/MPC-Filter/Path-Consistent), (c) \textbf{đóng vòng CEGIS chủ động} (khác cả 4 bài), và (d) \textbf{chứng nhận một batch chunk rồi chọn/sửa} (khác MPC-Filter/CBF vốn chỉ sửa 1 input). Nói cách khác, ShortStop nằm ở giao của ba trục: \emph{post-hoc} (như MPC-Filter, Path-Consistent) $\times$ \emph{reachability+STL rigor} (như MPM-STL) $\times$ \emph{counterexample-guided} (chưa ai trong 4 bài có) — và chính giao điểm ba trục này, chứ không phải một trục riêng lẻ, là nơi đóng góp thật của bài báo.
+Đặt cạnh 3 baseline thực tế và 3 bài bối cảnh, ShortStop chiếm một điểm khá đặc thù: so với 3 baseline nó thực sự đối đầu (MPC-Filter, CBF-Shield, STL-Monitor), nó là bài \emph{duy nhất} vừa (a) chứng nhận một \textbf{batch $K$ chunk} rồi chọn/sửa (khác cả 3, vốn chỉ sửa 1 input hoặc chỉ giám sát 1 tín hiệu), vừa (b) đóng \textbf{vòng CEGIS chủ động} (khác cả 3). So với 3 bài bối cảnh (không benchmark trực tiếp), ShortStop cũng là bài duy nhất (c) \textbf{không sửa generator} (khác SafeDiffuser) \emph{và} có \textbf{STL phong phú trên cả tube} (như MPM-STL) \emph{và} đóng CEGIS (khác cả MPM-STL lẫn Path-Consistent). Nói cách khác, ShortStop nằm ở giao của ba trục: \emph{post-hoc} (như MPC-Filter, Path-Consistent) $\times$ \emph{reachability+STL rigor} (như MPM-STL, STL-Monitor) $\times$ \emph{counterexample-guided} (chưa ai trong 6 bài có) — và chính giao điểm ba trục này, chứ không phải một trục riêng lẻ, là nơi đóng góp thật của bài báo. Quan trọng: lập luận này đứng vững dựa trên \emph{giới hạn phương pháp} của từng bài baseline/context, không phụ thuộc vào con số Table~II cụ thể (số kỳ vọng, sẽ được cập nhật).
 
 \subsection{Những câu hỏi còn mở (đáng đọc tiếp / có thể là hướng mở rộng)}
 \begin{itemize}
@@ -412,7 +471,7 @@ Batch $K$ chunk + chọn? & Không & Không (1 input) & Không & Không rõ \\
 \bibitem{power2023sampling} T. Power, R. Soltani-Zarrin, S. Iba, D. Berenson, ``Sampling Constrained Trajectories Using Composable Diffusion Models,'' IROS Workshop 2023.
 \bibitem{mayne2000constrained} D. Q. Mayne, J. B. Rawlings, C. V. Rao, P. O. M. Scokaert, ``Constrained Model Predictive Control: Stability and Optimality,'' Automatica, vol.~36, no.~6, 2000.
 \bibitem{yu2024modelpredictive} X. Yu, W. Dong, X. Yin, S. Li, ``Model Predictive Monitoring of Dynamical Systems for Signal Temporal Logic Specifications,'' arXiv:2209.12493; Automatica, 2024.
-\bibitem{pathconsistent2025} Anonymous/authors, ``From Demonstrations to Safe Deployment: Path-Consistent Safety Filtering for Diffusion Policies,'' arXiv:2511.06385, 2025.
+\bibitem{pathconsistent2025} R. Römer, J. Balletshofer, J. Thumm, M. Pavone, A. P. Schoellig, M. Althoff, ``From Demonstrations to Safe Deployment: Path-Consistent Safety Filtering for Diffusion Policies,'' arXiv:2511.06385, 2025; accepted ICRA 2026.
 \end{thebibliography}
 
 \end{document}
