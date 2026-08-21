@@ -25,7 +25,7 @@
 
 \maketitle
 
-\begin{frame}{Overview}
+\begin{frame}[t,shrink=8]{Overview}
 \begin{itemize}
     \item Part 0 --- From Classical Control to Generative Policies
     \item Part 1 --- Problem Formulation \& Core Insight
@@ -35,8 +35,7 @@
     \item Part 5 --- Literature, Gap \& Novelty
     \item Part 6 --- Guarantees \& Challenges
     \item Part 7 --- Evaluation Framework
-    \item Track A --- Kế hoạch tìm hiểu lý thuyết
-    \item Track B --- Kế hoạch thực nghiệm / implement
+    \item Track A \& Track B --- Kế hoạch song song (lý thuyết + thực nghiệm)
     \item Tổng kết
 \end{itemize}
 \end{frame}
@@ -45,7 +44,7 @@
 \section{Part 0 --- From Classical Control to Generative Policies}
 %=====================================================================
 
-\begin{frame}{Bài toán tổng quát: robot cần quyết định gì, ở đâu?}
+\begin{frame}[t,shrink=8]{Bài toán tổng quát: robot cần quyết định gì, ở đâu?}
 \begin{itemize}
     \item \textbf{Bối cảnh thực tế}: robot tay máy (robot arm) trong nhà máy/kho hàng/nhà bếp --- ví dụ gắp vật, tránh chướng ngại vật, đặt đồ đúng vị trí.
     \item \textbf{Input}: quan sát hiện tại $o_t$ --- ảnh camera, vị trí/vận tốc khớp, vị trí vật cản hoặc mục tiêu.
@@ -57,7 +56,7 @@ Hàm quyết định $\pi$ này được \textbf{xây dựng như thế nào}? -
 \end{alertblock}
 \end{frame}
 
-\begin{frame}{Từ Classical Control đến Generative Policies}
+\begin{frame}[t,shrink=8]{Từ Classical Control đến Generative Policies}
 \begin{itemize}
     \item \textbf{Control cổ điển} (PID, LQR): luật điều khiển suy từ phương trình vật lý $\Rightarrow$ \good{chứng minh được} an toàn/ổn định.
     \item \textbf{MPC}: giải bài toán tối ưu có ràng buộc mỗi bước (receding horizon) $\Rightarrow$ ràng buộc nằm ngay trong QP.
@@ -65,11 +64,9 @@ Hàm quyết định $\pi$ này được \textbf{xây dựng như thế nào}? -
     \item \textbf{Safe RL / CBF-QP}: cố lấy lại bảo đảm bằng barrier function, nhưng chỉ sửa \emph{một} hành động.
     \item \textbf{Generative policy (diffusion/flow)}: sinh cả \emph{chuỗi} hành động, không có certificate nào.
 \end{itemize}
-\vspace{4pt}
-\footnotesize\textit{Phần tiếp theo trình bày chậm rãi từng giai đoạn --- bắt đầu từ MPC vì đây là nền tảng đã được trình bày trong nghiên cứu trước đó.}
 \end{frame}
 
-\begin{frame}{Model Predictive Control (MPC)}
+\begin{frame}[t,shrink=8]{Model Predictive Control (MPC)}
 \begin{itemize}
     \item \textbf{Ý tưởng}: tại mỗi bước thời gian, giải một bài toán tối ưu \emph{có ràng buộc}, dự đoán trước $N$ bước tương lai bằng mô hình động lực $f$, tìm ra cả chuỗi hành động tối ưu --- nhưng chỉ \textbf{thực thi hành động đầu tiên}, rồi giải lại từ đầu ở bước kế tiếp (\emph{receding horizon}).
     \item \textbf{Vì sao vẫn chứng minh được an toàn}: ràng buộc vật lý (giới hạn khớp, tránh vật cản) được đưa thẳng vào bài toán tối ưu dưới dạng \emph{constraint} --- nghiệm mà bộ giải (QP) trả về, nếu tồn tại, \textbf{luôn} thoả ràng buộc đó, không phải "hy vọng" mà là bảo đảm từ chính cấu trúc bài toán.
@@ -78,7 +75,7 @@ Hàm quyết định $\pi$ này được \textbf{xây dựng như thế nào}? -
 \end{itemize}
 \end{frame}
 
-\begin{frame}{Reinforcement Learning \& Imitation Learning}
+\begin{frame}[t,shrink=8]{Reinforcement Learning \& Imitation Learning}
 \begin{itemize}
     \item Thay vì viết công thức tay, để một mạng nơ-ron $\pi_\theta$ \textbf{học} luật điều khiển từ dữ liệu:
     \begin{itemize}
@@ -90,103 +87,490 @@ Hàm quyết định $\pi$ này được \textbf{xây dựng như thế nào}? -
 \end{itemize}
 \end{frame}
 
-\begin{frame}{Safe RL via Control Barrier Functions (CBF-QP)}
+\begin{frame}[t,shrink=8]{Safe RL via Control Barrier Functions (CBF-QP)}
 \begin{itemize}
     \item \textbf{Ý tưởng}: giữ nguyên policy học được (RL) làm việc chính, nhưng thêm một lớp ``gác cổng'' (safety filter) đứng giữa policy và robot thật.
     \item \textbf{Control Barrier Function (CBF)}: định nghĩa một hàm $h(x)$ sao cho ``an toàn'' $\Leftrightarrow$ $h(x)\ge 0$. Trước khi thực thi, giải một bài toán tối ưu nhỏ (QP) để sửa action đề xuất --- \textbf{sửa càng ít càng tốt} so với đề xuất gốc, miễn giữ được $h(x)\ge 0$.
-    \item \textbf{Giới hạn}: (a) $h(x)$ phải \emph{thiết kế tay} cho từng tình huống nguy hiểm cụ thể; (b) chỉ sửa được \textbf{một} hành động tại một thời điểm, không nhìn xa hơn 1 bước.
+    \item \textbf{Giới hạn}: (a) $h(x)$ phải \emph{thiết kế tay} cho từng tình huống nguy hiểm cụ thể; (b) can thiệp ở mức action tức thời, thay vì đánh giá/chứng nhận cả một action chunk..
     \item CBF-Shield là một baseline quan trọng vì cùng theo triết lý sử dụng lớp safety filter đặt ngoài policy.
 \end{itemize}
 \end{frame}
 
-\begin{frame}{Generative Policies: Diffusion and Flow Matching}
+\begin{frame}[t,shrink=8]{Generative Policies: Diffusion and Flow Matching}
+
 \begin{itemize}
-    \item Vẫn là policy học từ dữ liệu (như RL/Imitation Learning), nhưng thay vì trả về \textbf{một} hành động, sampler sinh ra cả một \alert{chuỗi} $H$ hành động tương lai (\emph{action chunk}), commit cùng lúc.
-    \item Không có certificate nào đi kèm --- chunk được thực thi ngay khi sinh ra, khác hẳn MPC (ràng buộc trong bài toán tối ưu) và CBF-QP (lớp gác cổng sửa 1 action).
-    \item Việc sinh cả action chunk giúp tạo quỹ đạo mượt và nhất quán theo thời gian, nhưng cũng làm phát sinh bài toán chứng nhận an toàn.
+    \item Vẫn là \textbf{learned policy}, nhưng thay vì học một ánh xạ
+    trực tiếp
+    \[
+    o_t \rightarrow a_t,
+    \]
+    generative policy học một \textbf{phân phối trên các hành vi hợp lý}
+    và rút mẫu từ phân phối đó.
+
+    \item Trong robot manipulation, policy thường sinh một
+    \alert{action chunk}
+    \[
+    a_{t:t+H}=(a_t,\ldots,a_{t+H-1}),
+    \]
+    giúp duy trì temporal consistency và tăng throughput.
+
+    \item Diffusion và flow matching là hai cơ chế phổ biến để thực hiện
+    quá trình sinh mẫu này.
+
+    \item Đây là bước tiến lớn về \textbf{multimodality} và khả năng xử lý
+    các thao tác phức tạp mà khó viết tay.
+
 \end{itemize}
+
+\begin{alertblock}{Nhưng một vấn đề mới xuất hiện}
+Policy không còn đơn giản là ``tính ra một action'' ---
+nó \textbf{sinh ra một chunk từ một phân phối}, và chunk đó
+không đi kèm safety certificate.
+\end{alertblock}
 \end{frame}
 
-\begin{frame}{Nguyên lý cốt lõi: vì sao cần ``sinh mẫu'' thay vì hồi quy}
+\begin{frame}[t,shrink=8]{Why generate a distribution instead of regressing one action?}
+
 \begin{itemize}
-    \item \textbf{Hồi quy đơn giản thất bại} khi có nhiều lời giải đúng như nhau (multimodality) --- ví dụ vòng tay trái/phải qua vật cản $\to$ trung bình hoá 2 lời giải $\to$ đi thẳng vào vật cản, \emph{sai cả hai}.
-    \item \textbf{Generative model giải quyết bằng cách nào}: học \emph{cả phân phối} lời giải hợp lý, mỗi lần dùng thì \emph{rút mẫu} một lời giải cụ thể --- giống mô hình sinh ảnh, hỏi ``vẽ con mèo'' 5 lần ra 5 con mèo khác nhau, đều hợp lý.
-    \item \textbf{Khác biệt cốt lõi so với các phương pháp trước}: MPC/RL/CBF-QP đều trả về \emph{một} hành động xác định, có ràng buộc hoặc gác cổng đi kèm; generative policy trả về \emph{cả một chuỗi} $H$ hành động (action chunk), rút mẫu ngẫu nhiên, không ràng buộc, không certificate.
+    \item Với một observation, có thể tồn tại \textbf{nhiều hành vi đều
+    đúng} --- đây là bài toán \alert{multimodality}.
+    
+    \item Ví dụ: robot có thể đi vòng vật cản bên trái hoặc bên phải.
+    Nếu ép policy hồi quy một action duy nhất, các mode có thể bị
+    \textbf{average} thành một hành vi không hợp lý.
+
+    \item Generative policy thay vào đó học
+    \[
+    p_\theta(a_{t:t+H}\mid o_t),
+    \]
+    rồi \textbf{sample} một hành vi cụ thể từ phân phối này.
+
+    \item Vì vậy, cùng một observation có thể sinh ra nhiều chunk khác
+    nhau --- miễn chúng đều nằm trong các mode mà policy đã học.
+
 \end{itemize}
+
+\vspace{4pt}
+\begin{center}
+\[
+\boxed{
+\text{Regression}
+\;\rightarrow\;
+\text{one prediction}
+}
+\qquad
+\boxed{
+\text{Generative policy}
+\;\rightarrow\;
+\text{distribution of possible behaviors}
+}
+\]
+\end{center}
 \end{frame}
 
-\begin{frame}{Cơ chế: Diffusion Policy và Flow Matching sinh action chunk thế nào}
-\begin{itemize}
-    \item \textbf{Diffusion}: forward = làm nhiễu dần một mẫu thật; reverse = học khử nhiễu dần từ nhiễu trắng ra mẫu hợp lệ --- chia nhỏ thành nhiều bước, mỗi bước dễ học hơn học trực tiếp 1 bước.
-    \item \textbf{Diffusion Policy} (Chi et al., RSS 2023): denoiser lấy quan sát $o_t$ làm điều kiện, khử nhiễu ra thẳng một \emph{action chunk} $H$ bước (không phải ảnh).
-    \item \textbf{Flow matching} (Lipman et al., ICLR 2023): học một luồng liên tục/xác định (ODE) từ nhiễu tới mẫu --- ít bước tích hợp hơn diffusion, nhưng bản chất vẫn là sampler nhiều tham số.
-    \item \textbf{Vì sao sinh cả chunk, không phải từng action}: mượt hơn, nhất quán theo thời gian, giảm số lần chạy mạng $\to$ tăng throughput --- nhưng đổi lại, chunk đã ``chốt'' là chốt cho cả $H$ bước, thực thi ngay khi sinh ra, không có bước kiểm tra nào ở giữa.
-\end{itemize}
-\end{frame}
-
-\begin{frame}{Điểm mạnh / điểm yếu --- đây chính là motivation của ShortStop}
+\begin{frame}[t,shrink=8]{How does a generative policy produce an action chunk?}
 \begin{columns}[T]
 \column{0.5\textwidth}
-\textbf{\good{Điểm mạnh}}
+
+\textbf{Diffusion Policy}
+\[
+\text{noise}
+\rightarrow
+\text{denoising steps}
+\rightarrow
+a_{t:t+H}
+\]
 \begin{itemize}
-    \item Xử lý tốt multimodality (nhiều lời giải hợp lý)
-    \item Action chunk mượt, nhất quán thời gian
-    \item Throughput cao hơn (ít lần gọi mạng hơn)
-    \item Tổng quát hoá tốt cho tác vụ khó viết tay (cầm nắm vật mềm, thao tác khéo léo)
+    \item Denoiser conditioned on observation $o_t$
+    \item Iteratively transforms noise into a valid action chunk
 \end{itemize}
 \column{0.5\textwidth}
-\textbf{\bad{Điểm yếu}}
+
+\textbf{Flow Matching}
+\[
+\text{noise}
+\rightarrow
+\text{ODE flow}
+\rightarrow
+a_{t:t+H}
+\]
 \begin{itemize}
-    \item Mạng nơ-ron cỡ chục--trăm triệu tham số --- hộp đen
-    \item Phải qua nhiều bước nội tại (denoising/ODE) mới ra 1 chunk
-    \item Ngẫu nhiên/đa modal --- hỏi lại có thể ra chunk khác
-    \item Không certificate nào đi kèm khi chunk được thực thi
+    \item Learns a continuous vector field
+    \item Sampling follows the learned ODE
 \end{itemize}
+
 \end{columns}
-\vspace{6pt}
-\alert{$\Rightarrow$ chính 4 điểm yếu này là động lực (motivation) trực tiếp của ShortStop --- không phải nhận xét phụ.}
+\vspace{7pt}
+
+\begin{alertblock}{Common abstraction for SHORTSTOP}
+SHORTSTOP does not care how the chunk was generated.
+\[
+\boxed{
+\pi_\theta(o_t)
+\rightarrow
+a_{t:t+H}
+}
+\]
+The generative policy is treated as a \textbf{black-box chunk proposer}.
+\end{alertblock}
 \end{frame}
 
 %=====================================================================
 \section{Part 1 --- Problem Formulation \& Core Insight}
 %=====================================================================
+\begin{frame}[t,shrink=8]{Generative policies: capability comes with a safety gap}
+\begin{columns}[T]
+\column{0.5\textwidth}
 
-\begin{frame}{Vấn đề cụ thể (Sec.~I của ShortStop)}
+\textbf{\good{What we gain}}
 \begin{itemize}
-    \item Diffusion/flow-matching policy $\to$ chuẩn mới cho robot manipulation, nhưng đi kèm đúng 4 điểm yếu ở trên.
-    \item Quan sát lệch chuẩn (vật cản đặt sai, trễ tín hiệu, ánh sáng thay đổi) có thể đẩy sampler vào chế độ đâm vào bàn/người/giới hạn khớp --- và không ai biết trước, vì $\pi_\theta$ là hộp đen.
-    \item Các tool neural-network reachability (Verisig, NNV, ReachNN,\dots) chỉ scale tới mạng nhỏ, horizon ngắn --- không tới nổi denoiser này qua contact dynamics.
-    \item $\Rightarrow$ Full formal verification của $\pi_\theta$ $\to$ \bad{bất khả thi} --- vậy phải làm gì?
+    \item Multimodality
+    \item Temporal consistency
+    \item High-throughput chunk execution
+    \item Complex manipulation without hand-crafted control laws
 \end{itemize}
-\end{frame}
+\column{0.5\textwidth}
 
-\begin{frame}{Bất khả thi $\to$ khả thi: vì sao cần shield}
-\begin{quote}
-``We do not need to verify the policy to make it safe. We only need to verify, cheaply and just-in-time, the consequences of the chunk it is about to execute.''
-\end{quote}
+\textbf{\bad{What we lose}}
 \begin{itemize}
-    \item KHÔNG hỏi: ``$\pi_\theta$ luôn an toàn với mọi observation?'' (bất khả thi).
-    \item CHỈ hỏi: ``với chunk cụ thể vừa đề xuất, hậu quả ngắn hạn có an toàn?'' (khả thi --- input đã cố định, chỉ còn 1 hệ động lực bị điều khiển).
-    \item $\pi_\theta$ = black-box proposer, không phải đối tượng cần verify $\Rightarrow$ \alert{đây chính là lý do cần một shield đứng ngoài}.
+    \item Deep sampler $\Rightarrow$ black-box behavior
+    \item Stochastic sampling $\Rightarrow$ different chunks can be generated
+    \item A chunk spans multiple future actions
+    \item \textbf{No safety certificate comes with the generated chunk}
 \end{itemize}
+
+\end{columns}
+\vspace{7pt}
 \begin{center}
-\Large \bad{Policy Safety?} $\;\Longrightarrow\;$ \good{Chunk Safety?}
+\Large
+\[
+\boxed{
+\text{Generative policy solves ``how to act''}
+}
+\]
+\[
+\Downarrow
+\]
+\[
+\boxed{
+\textbf{But who guarantees that the proposed behavior is safe?}
+}
+\]
 \end{center}
 \end{frame}
 
-\begin{frame}{ShortStop = chuyển vai trò của control, không phát minh lại nó}
-\begin{block}{Ý chính}
-Công cụ control cổ điển (reachable set, invariant set) \textbf{không biến mất} khi chuyển sang policy học được --- nó chỉ đổi vai trò: từ \alert{controller} (MPC tự sinh action) sang \alert{supervisor} (ShortStop chỉ lọc/sửa đề xuất của một sampler mạnh hơn nhưng không giải thích được).
+\begin{frame}[t,shrink=8]{Why not formally verify the generative policy?}
+
+\begin{block}{The obvious solution}
+Verify the policy itself:
+\[
+\forall o,\qquad
+\pi_\theta(o)
+\text{ produces safe behavior}.
+\]
 \end{block}
+
 \begin{itemize}
-    \item Ẩn dụ: một huấn luyện viên bay ngồi cạnh học viên --- không tự lái, chỉ nhìn trước vài giây và can thiệp khi thấy nguy hiểm cụ thể.
-    \item Ngành đang đi từ policy nhỏ $\to$ foundation-model policy (VLA) $\Rightarrow$ câu hỏi ``ai bảo đảm an toàn'' ngày càng cấp thiết.
+    \item Nhưng $\pi_\theta$ là một deep generative sampler với hàng triệu
+    tham số và nhiều bước nội tại.
+    
+    \item Sau khi sinh chunk, nó còn tương tác với robot dynamics,
+    contact và environmental disturbances.
+    
+    \item Neural-network reachability tools scale only to relatively
+    modest networks and short horizons.
+    
+    \item Full formal verification của generative policy vì vậy là
+    \bad{không thực tế}.
 \end{itemize}
+
+\vspace{5pt}
+
+\begin{alertblock}{Key insight of SHORTSTOP}
+Không cần chứng minh
+\[
+\text{``policy luôn an toàn.''}
+\]
+Chỉ cần chứng minh
+\[
+\boxed{
+\text{``chunk sắp được thực thi an toàn trong short horizon.''}
+}
+\]
+\end{alertblock}
 \end{frame}
 
 %=====================================================================
-\section{Part 2 --- Foundations of ShortStop}
+\section{Part 2 --- Existing Safety Machinery \& Gap}
 %=====================================================================
+
+\begin{frame}[t,shrink=8]{Existing safety machinery for learned policies}
+
+\begin{itemize}
+    \item Khi policy đã được học, một hướng tự nhiên là đặt thêm
+    \textbf{safety mechanism} bên ngoài policy thay vì thay đổi controller
+    chính.
+
+    \vspace{4pt}
+
+    \item Các hướng gần với bài toán của chúng ta gồm:
+
+    \begin{enumerate}
+        \item \textbf{Generator modification}:
+        bias hoặc retrain generative policy để ưu tiên các trajectory
+        an toàn/khả thi.
+
+        \item \textbf{MPC-based filtering}:
+        dự đoán tương lai và sửa action bằng constrained optimization.
+
+        \item \textbf{CBF-based shielding}:
+        dùng barrier condition để ngăn policy đưa hệ ra khỏi vùng an toàn.
+
+        \item \textbf{STL monitoring}:
+        đánh giá trajectory dựa trên một temporal specification.
+    \end{enumerate}
+
+\end{itemize}
+
+\vspace{5pt}
+
+\begin{alertblock}{Nhưng generative policy đặt ra một yêu cầu mới}
+Ta không chỉ muốn ``sửa action cho an toàn'', mà muốn
+\textbf{đánh giá và chứng nhận một action chunk} trước khi nó được thực thi.
+\end{alertblock}
+\end{frame}
+
+%=====================================================================
+
+\begin{frame}[t,shrink=8]{Gap 1 --- Modify the generator vs.\ protect it post-hoc}
+\begin{columns}[T]
+\column{0.48\textwidth}
+
+\textbf{Safe generation}
+\[
+\text{training / sampling}
+\rightarrow
+\text{safer policy}
+\]
+\begin{itemize}
+    \item Safety được đưa vào quá trình training hoặc generation.
+    \item Có thể bias policy về phía feasible/safe behaviors.
+\end{itemize}
+\column{0.48\textwidth}
+
+\textbf{SHORTSTOP}
+\[
+\text{frozen }\pi_\theta
+\rightarrow
+\text{safety filter}
+\]
+\begin{itemize}
+    \item Không retrain policy.
+    \item Không sửa denoiser / flow.
+    \item Có thể áp dụng cho policy đã được train sẵn.
+\end{itemize}
+
+\end{columns}
+\vspace{6pt}
+
+\begin{alertblock}{Gap}
+Các phương pháp safe generation thay đổi chính policy mà chúng ta muốn
+bảo vệ. SHORTSTOP đặt safety \textbf{post-hoc}, bên ngoài một
+generative policy đã đóng băng.
+\end{alertblock}
+\end{frame}
+
+%=====================================================================
+
+\begin{frame}[t,shrink=8]{Gap 2 --- Action-level correction vs.\ chunk-level safety}
+\begin{columns}[T]
+\column{0.48\textwidth}
+
+\textbf{MPC / CBF filtering}
+\[
+\pi_\theta(o_t)
+\rightarrow
+\boxed{a_t}
+\rightarrow
+\text{filter}
+\]
+\begin{itemize}
+    \item MPC có thể dự đoán tương lai nhưng cuối cùng điều chỉnh
+    action được thực thi.
+    
+    \item CBF-QP áp đặt safety condition tại thời điểm hiện tại.
+\end{itemize}
+\column{0.48\textwidth}
+
+\textbf{Generative policy}
+\[
+\pi_\theta(o_t)
+\rightarrow
+\boxed{
+a_{t:t+H}
+}
+\]
+\begin{itemize}
+    \item Một lần sampling tạo ra cả action chunk.
+    \item Chunk có temporal coupling: các action trong chunk không độc lập.
+\end{itemize}
+
+\end{columns}
+\vspace{6pt}
+
+\begin{alertblock}{Gap}
+Safety mechanism cần reason về \textbf{cả short-horizon chunk},
+không chỉ một action tức thời.
+\end{alertblock}
+\end{frame}
+
+%=====================================================================
+
+\begin{frame}[t,shrink=8]{Gap 3 --- Hand-designed safety vs.\ learned dynamics}
+\begin{columns}[T]
+\column{0.48\textwidth}
+
+\textbf{CBF / classical safety control}
+\[
+h(x)\geq 0
+\]
+\begin{itemize}
+    \item Cần một barrier function phù hợp với unsafe set.
+    \item Thường cần mô hình dynamics có cấu trúc rõ ràng.
+    \item Việc thiết kế $h(x)$ trở nên khó khi môi trường và task phức tạp.
+\end{itemize}
+\column{0.48\textwidth}
+
+\textbf{SHORTSTOP}
+\[
+\hat f(x,a)
+\quad+\quad
+\epsilon
+\]
+\begin{itemize}
+    \item Sử dụng local dynamics hoặc learned transition model.
+    \item Sai số model được bao phủ bởi certified error bound.
+    \item Không yêu cầu một CBF riêng cho từng obstacle/task.
+\end{itemize}
+
+\end{columns}
+\vspace{6pt}
+
+\begin{alertblock}{Gap}
+Thay vì encode từng vùng nguy hiểm thành một barrier function,
+SHORTSTOP reasons trực tiếp về \textbf{reachable state tube} của candidate chunk.
+\end{alertblock}
+\end{frame}
+
+%=====================================================================
+
+\begin{frame}[t,shrink=8]{Gap 4 --- Nominal monitoring vs.\ sound tube certification}
+\begin{columns}[T]
+\column{0.48\textwidth}
+
+\textbf{Nominal STL monitor}
+\[
+x_0
+\rightarrow
+\hat x_1
+\rightarrow
+\cdots
+\rightarrow
+\hat x_H
+\]
+\begin{itemize}
+    \item Roll out một trajectory duy nhất.
+    \item Tính STL robustness trên trajectory đó.
+    \item Negative robustness $\Rightarrow$ reject.
+\end{itemize}
+\column{0.48\textwidth}
+
+\textbf{SHORTSTOP}
+\[
+x_0
+\rightarrow
+\boxed{
+\hat{\mathcal R}_{0:H}
+}
+\]
+\begin{itemize}
+    \item Propagate một reachable-set over-approximation.
+    \item STL robustness được lower-bound trên \textbf{toàn tube}.
+    \item Sau đó tìm counterexample trong tube.
+\end{itemize}
+
+\end{columns}
+\vspace{6pt}
+
+\begin{alertblock}{Gap}
+Một nominal rollout chỉ trả lời ``trajectory này có vẻ an toàn''.
+SHORTSTOP cần trả lời mạnh hơn:
+\[
+\boxed{\text{mọi trajectory được tube bao phủ đều thỏa safety specification.}}
+\]
+\end{alertblock}
+\end{frame}
+
+%=====================================================================
+
+\begin{frame}[t,shrink=8]{The combined gap}
+\begin{center}
+\begin{tabular}{c|c}
+\textbf{Existing approach} & \textbf{What remains missing} \\ \hline
+
+Generator modification
+& Post-hoc protection of a frozen policy \\[5pt]
+
+MPC / CBF
+& Safety reasoning over temporally extended chunks \\[5pt]
+
+Hand-designed CBF / optimal-control model
+& General short-horizon reasoning with learned dynamics \\[5pt]
+
+Nominal STL monitor
+& Sound reachable-tube certificate + counterexample search
+\end{tabular}
+\end{center}
+\vspace{8pt}
+
+\begin{alertblock}{Research gap}
+What is missing is a runtime shield that simultaneously provides
+\[
+\boxed{
+\text{post-hoc}
++
+\text{chunk-level}
++
+\text{tube-based}
++
+\text{counterexample-guided}
+}
+\]
+safety for an \textbf{unmodified generative robot policy}.
+\end{alertblock}
+\end{frame}
+
+%=====================================================================
+\section{Part 3 --- SHORTSTOP Runtime Shield}
+%=====================================================================
+
+\begin{frame}[t,shrink=8]{SHORTSTOP: the missing runtime safety layer}
+\begin{block}{Core idea}
+SHORTSTOP wraps a \textbf{frozen generative policy} and checks the
+short-horizon consequences of its proposed action chunks before execution.
+\end{block}
+\vspace{6pt}
+\begin{center}
+\[\boxed{\text{Generative Policy}}\quad\longrightarrow\quad\boxed{\text{SHORTSTOP}}\quad\longrightarrow\quad\text{Robot}\]
+\end{center}
+\vspace{6pt}
+\begin{itemize}
+    \item Policy vẫn chịu trách nhiệm về \textbf{task performance / multimodal behavior}.
+    \item SHORTSTOP chịu trách nhiệm về \textbf{runtime safety}.
+    \item Policy không cần biết safety mechanism tồn tại ở phía sau.
+    \item SHORTSTOP chỉ can thiệp khi candidate chunk không đạt certified safety condition.
+\end{itemize}
+\end{frame}
 
 \begin{frame}{Một runtime shield cần giải quyết những gì?}
 \begin{itemize}
@@ -200,26 +584,60 @@ Công cụ control cổ điển (reachable set, invariant set) \textbf{không bi
 \end{itemize}
 \end{frame}
 
-\begin{frame}{Related work}
+\begin{frame}[t,shrink=8]{Existing building blocks → SHORTSTOP (1/2)}
+
 \begin{center}
 \includegraphics[width=0.5\linewidth]{images/shorstop_loop.png}
 \end{center}
+
 \vspace{2pt}
 \footnotesize
+
 \begin{itemize}
-    \item \textbf{Predict} $\to$ \textbf{Reachability analysis} --- set propagation (CORA, Flow*), reachtube $\{\hat R_k\}$.
-    \item \textbf{Certify} $\to$ \textbf{Signal Temporal Logic (STL)} --- robustness định lượng, tính trên cả tube, không chỉ 1 quỹ đạo.
-    \item \textbf{Repair} $\to$ \textbf{CEGIS/CEGAR} --- dùng witness cụ thể để vừa bác bỏ vừa định hướng sửa.
+    \item \textbf{Predict}
+    $\rightarrow$
+    \textbf{Reachability analysis}
+    --- set propagation (CORA, Flow*), yielding a reachtube
+    $\{\hat R_k\}$.
+
+    \item \textbf{Certify}
+    $\rightarrow$
+    \textbf{Signal Temporal Logic (STL)}
+    --- quantitative robustness evaluated over the reachable tube,
+    rather than only a nominal trajectory.
+
+    \item \textbf{Repair}
+    $\rightarrow$
+    \textbf{CEGIS/CEGAR}
+    --- use concrete counterexamples both to falsify unsafe candidates
+    and to guide repair.
+
 \end{itemize}
-\vspace{2pt}
-\textbf{Không có khối nào mới} --- cái mới là \alert{cách ghép} chúng lại cho một generative sampler, lần đầu tiên.
+
+\end{frame}
+
+\begin{frame}[t,shrink=8]{Existing building blocks → SHORTSTOP (2/2)}
+
+\begin{center}
+\includegraphics[width=0.5\linewidth]{images/shorstop_loop.png}
+\end{center}
+
+\vspace{3pt}
+
+\begin{alertblock}{SHORTSTOP's contribution}
+The individual tools are established building blocks.
+The contribution is their \textbf{integration into a single,
+counterexample-guided runtime shield} for a frozen generative policy,
+with a per-decision safety guarantee.
+\end{alertblock}
+
 \end{frame}
 
 %=====================================================================
-\section{Part 3 --- The P-R-C-S Framework}
+\section{Part 4 --- The P-R-C-S Framework}
 %=====================================================================
 
-\begin{frame}[t]{SHORTSTOP: vòng lặp P-R-C-S}
+\begin{frame}[t,shrink=8]{SHORTSTOP: vòng lặp P-R-C-S}
 \small
 \begin{block}{Tại mỗi decision step $t$}
 SHORTSTOP giữ nguyên policy $\pi_\theta$, lấy một batch candidate chunks, kiểm tra an toàn và chỉ cho phép chunk phù hợp được thực thi.
@@ -289,117 +707,367 @@ Nếu có candidate admissible: $a^*=\arg\max_{a^{(i)}\in\mathcal C} g(a^{(i)})$
 Nếu tất cả candidate đều fail: chuyển sang \textbf{safe fallback controller}, sau đó quan sát lại và re-plan.
 
 \end{columns}
-
 \end{frame}
 
 %=====================================================================
-\section{Part 5 --- Literature, Gap \& Novelty}
+\section{Part 5 --- Experimental Setup}
 %=====================================================================
 
-\begin{frame}{Các hướng tiếp cận gần nhất trong literature}
+\begin{frame}[t,shrink=8]{Experimental setup}
+
+\begin{center}
+
+\Large
+\[
+\boxed{
+\text{Where?}
+\quad
+\boxed{\text{How stressed?}}
+\quad
+\boxed{\text{Compared against whom?}}
+\quad
+\boxed{\text{Measured how?}}
+}
+\]
+
+\end{center}
+
+\vspace{8pt}
+
 \begin{itemize}
-    \item Ứng với mỗi nhu cầu Predict/Certify/Repair (Part 2), ai đã làm rồi và còn thiếu gì? $\Rightarrow$ ưu tiên truy ngược đúng \textbf{3 baseline được benchmark trong Table~II}: \texttt{MPC-Filter}~[33], \texttt{CBF-Shield}~[38,39], \texttt{STL-Monitor}~[53].
-    \item So với đúng bài baseline $\Rightarrow$ lập luận mạnh/yếu bám vào \emph{giới hạn phương pháp gốc}, không chỉ ``nghe liên quan''.
-    \item \alert{Lưu ý}: số liệu Table~II/III hiện là số \textbf{kỳ vọng/placeholder} $\Rightarrow$ phần so sánh dưới đây bám \emph{giới hạn cấu trúc}, không bám chênh lệch số cụ thể.
+    \item \textbf{Environments}: từ benchmark manipulation đến controlled
+    reach-avoid setting.
+
+    \item \textbf{Stress tests}: cố tình đưa policy ra khỏi nominal
+    distribution.
+
+    \item \textbf{Baselines}: cùng frozen generative policy, chỉ thay đổi
+    safety mechanism.
+
+    \item \textbf{Metrics}: đánh giá đồng thời safety, task performance,
+    intervention quality và runtime cost.
 \end{itemize}
+
 \end{frame}
 
-\begin{frame}{Baseline 1: MPC-Filter (Wabersich \& Zeilinger, 2021) --- nhu cầu Repair}
-\textbf{Phương pháp gốc}: MPC filter sửa tối thiểu 1 action qua constrained QP --- chính là baseline \texttt{MPC-Filter}.
-\begin{columns}[T]
-\column{0.5\textwidth}
-\textbf{\good{Mạnh hơn ShortStop}}
-\begin{itemize}
-    \item Lý thuyết recursive-feasibility trưởng thành
-    \item Chỉ sửa 1 action --- đơn giản khi model lồi
-\end{itemize}
-\column{0.5\textwidth}
-\textbf{\bad{Giới hạn cấu trúc (từ bài gốc)}}
-\begin{itemize}
-    \item Chỉ sửa 1 action, không có batch chunk $a_{t:t+H}$
-    \item Cần model optimal-control lồi/tractable
-    \item Không có STL / đặc tả thời gian phong phú
-\end{itemize}
-\end{columns}
-\end{frame}
+\begin{frame}[t,shrink=8]{Evaluation environments: from controlled to realistic}
 
-\begin{frame}{Baseline 2: CBF-Shield (Ames et al. 2017; Cheng et al. 2019) --- nhu cầu Certify+Repair tức thời}
-\textbf{Phương pháp gốc}: QP tức thời ép $\dot h(x,u)\ge-\alpha(h(x))$ với $h(x)$ thiết kế tay --- chính là baseline \texttt{CBF-Shield}.
-\begin{columns}[T]
-\column{0.5\textwidth}
-\textbf{\good{Mạnh hơn ShortStop}}
-\begin{itemize}
-    \item QP tuyến tính, giải cực nhanh
-    \item Lý thuyết forward-invariance trưởng thành
-\end{itemize}
-\column{0.5\textwidth}
-\textbf{\bad{Giới hạn cấu trúc (từ bài gốc)}}
-\begin{itemize}
-    \item $h(x)$ phải thiết kế tay từng hình dạng vùng nguy hiểm
-    \item Chỉ sửa 1 input tức thời, không horizon $H{>}1$
-    \item Cần $f,g$ tường minh, control-affine
-    \item Không temporal-logic, không counterexample witness
-\end{itemize}
-\end{columns}
-\end{frame}
+\begin{center}
 
-\begin{frame}{Baseline 3: STL-Monitor (Deshmukh et al., 2017) --- nhu cầu Certify}
-\textbf{Phương pháp gốc}: tính robustness STL trực tuyến trên 1 tín hiệu quan sát --- nguồn trực tiếp của Eq.~(2), và là baseline \texttt{STL-Monitor}.
-\begin{columns}[T]
-\column{0.5\textwidth}
-\textbf{\good{Mạnh hơn ShortStop}}
-\begin{itemize}
-    \item Đệ quy hiệu quả, đã trưởng thành
-    \item Tổng quát cho nhiều hệ cyber-physical
-\end{itemize}
-\column{0.5\textwidth}
-\textbf{\bad{Giới hạn cấu trúc (từ bài gốc)}}
-\begin{itemize}
-    \item Monitor \emph{bị động} --- không reject-and-repair
-    \item Tính trên 1 tín hiệu, không phải reachable set
-    \item Không xử lý batch $K$ chunk, không counterexample
-\end{itemize}
-\end{columns}
-\end{frame}
+\begin{tabular}{c|c|c}
+\textbf{Testbed} & \textbf{What it stresses} & \textbf{Role} \\ \hline
 
-\begin{frame}{Từ 3 nhu cầu đến khoảng trống chung mà literature cũ chưa lấp được}
-\begin{enumerate}
-    \item Sửa/retrain generator --- \textbf{SafeDiffuser} (Xiao et al., ICLR 2025) làm vậy; ShortStop \textbf{không} retrain.
-    \item Chỉ chứng nhận 1 action, không phải batch chunk --- \texttt{MPC-Filter}, \texttt{CBF-Shield}.
-    \item Cần CBF thiết kế tay / model optimal-control tường minh --- \texttt{CBF-Shield}.
-    \item Chỉ score 1 quỹ đạo nominal, không tube certificate, không counterexample --- \texttt{STL-Monitor}, và cả \textbf{MPM-STL} (Yu et al., 2024) dù đã đưa STL lên reachable set nhưng vẫn là monitor bị động.
-\end{enumerate}
-\end{frame}
+LIBERO~[56]
+&
+Long-horizon manipulation
+&
+Benchmark
+\\[5pt]
 
-\begin{frame}{Phần lớn các khối thành phần đã trưởng thành trong literature}
-\begin{itemize}
-    \item Set propagation interval/zonotope --- chuẩn CORA/Flow*.
-    \item STL robustness đệ quy trên interval --- recursion tiêu chuẩn.
-    \item MPC-Filter/CBF-Shield baseline --- tái dùng QP (Hildreth) đã có.
-    \item Receding-horizon re-certification --- giống MPC cổ điển.
-\end{itemize}
-\begin{alertblock}{Vậy điều gì còn lại?}
-Phần lớn các khối thành phần đều có sẵn trong literature; cái mới nằm ở cách kết hợp chúng.
+ManiSkill2~[57]
+&
+Contact-rich precision
+&
+Benchmark
+\\[5pt]
+
+RLBench~[58]
+&
+Diverse manipulation tasks
+&
+Benchmark
+\\[5pt]
+
+Reach-Avoid-2D
+&
+Controlled safety analysis
+&
+Soundness / prototype
+\end{tabular}
+
+\end{center}
+
+\vspace{7pt}
+
+\begin{alertblock}{Common setup}
+The same frozen imitation-trained generative policy is protected by
+each safety method. No baseline receives a separately retrained policy.
 \end{alertblock}
+
 \end{frame}
 
-\begin{frame}{Vậy ShortStop mới ở đâu? --- gói gọn trong 4 điểm}
-\begin{enumerate}
-    \item \textbf{Post-hoc, không retrain}: giữ nguyên $\pi_\theta$ đã đóng băng, không sửa/retrain generator như SafeDiffuser.
-    \item \textbf{Reach + STL + CEGIS trong cùng một vòng per-decision} --- không chỉ dùng riêng lẻ 1 trong 3 như các baseline ở trên.
-    \item \textbf{Chứng nhận cả action chunk (batch)}, không chỉ 1 action tức thời như MPC-Filter/CBF-Shield/STL-Monitor.
-    \item \textbf{Đi kèm bộ guarantee lý thuyết} (bounded-time $\to$ all-time, Grönwall-type bound) --- không chỉ heuristic.
-\end{enumerate}
-\begin{alertblock}{So với công trình cùng thời}
-\textbf{Path-Consistent Filtering} (Römer et al., arXiv:2511.06385, ICRA 2026) đồng thời cùng hướng nhưng chỉ nhắm diffusion, không thấy bounded-time/all-time theorem hay CEGIS tường minh trong mô tả công khai.
+\begin{frame}[t,shrink=8]{Evaluation environments}
+
+\begin{columns}[T]
+
+\column{0.25\textwidth}
+\centering
+\textbf{LIBERO}\\
+\small
+Goal / Object / Spatial / Long
+
+\column{0.25\textwidth}
+\centering
+\textbf{ManiSkill2}\\
+\small
+PickCube / StackCube / PegInsertion
+
+\column{0.25\textwidth}
+\centering
+\textbf{RLBench}\\
+\small
+Reach / Close-box / Put-in-drawer
+
+\column{0.25\textwidth}
+\centering
+\textbf{Reach-Avoid-2D}\\
+\small
+Controlled soundness study
+
+\end{columns}
+
+\vspace{10pt}
+
+\begin{center}
+\Large
+\[
+\text{Benchmark realism}
+\qquad\longleftrightarrow\qquad
+\text{Controlled analysis}
+\]
+\end{center}
+
+\end{frame}
+
+\begin{frame}[t,shrink=8]{Stress tests: deliberately leaving the nominal distribution}
+
+\begin{columns}[T]
+
+\column{0.33\textwidth}
+
+\textbf{1. Object-placement}
+
+\begin{itemize}
+    \item Obstacle / target shifted
+    \item Up to $\pm 6$ cm
+    \item Adversarial placement on nominal path
+\end{itemize}
+
+\vspace{3pt}
+
+\[
+\boxed{\text{Geometry shift}}
+\]
+
+\column{0.33\textwidth}
+
+\textbf{2. Timing}
+
+\begin{itemize}
+    \item Control-latency jitter
+    \item Dropped observations
+    \item Temporal mismatch
+\end{itemize}
+
+\vspace{3pt}
+
+\[
+\boxed{\text{Temporal shift}}
+\]
+
+\column{0.33\textwidth}
+
+\textbf{3. Visual-shift}
+
+\begin{itemize}
+    \item Lighting perturbation
+    \item Texture changes
+    \item Camera perturbation
+\end{itemize}
+
+\vspace{3pt}
+
+\[
+\boxed{\text{Perception shift}}
+\]
+
+\end{columns}
+
+\vspace{8pt}
+
+\begin{alertblock}{Purpose}
+The stress tests are designed to increase the unshielded violation rate
+and test whether a shield intervenes \textbf{precisely} rather than
+simply rejecting everything.
 \end{alertblock}
+
+\end{frame}
+
+\begin{frame}[t,shrink=8]{Baselines: six systems under the same conditions}
+
+\begin{center}
+
+\begin{tabular}{c|l}
+\textbf{System} & \textbf{Safety mechanism} \\ \hline
+
+\texttt{Unshielded}
+& Raw generative policy
+\\[3pt]
+
+\texttt{Conf-Thresh}
+& Reject high-disagreement chunks
+\\[3pt]
+
+\texttt{MPC-Filter}~[33]
+& Constrained predictive correction
+\\[3pt]
+
+\texttt{CBF-Shield}~[38,39]
+& Hand-designed barrier QP
+\\[3pt]
+
+\texttt{STL-Monitor}~[53]
+& Nominal STL monitoring
+\\[3pt]
+
+\textbf{SHORTSTOP}
+& Reach + STL + counterexample-guided repair
+\end{tabular}
+
+\end{center}
+
+\vspace{7pt}
+
+\begin{alertblock}{Controlled comparison}
+All model-based baselines use the same
+$\hat f$, error bound $\epsilon$, frozen policy checkpoint,
+and fallback controller.
+\end{alertblock}
+
+\end{frame}
+
+\begin{frame}[t,shrink=8]{Metrics I --- Safety and intervention quality}
+
+\begin{columns}[T]
+
+\column{0.5\textwidth}
+
+\textbf{Safety}
+
+\begin{itemize}
+    \item \textbf{Violation rate}
+    
+    \[
+    \%\,\text{episodes entering }X_u
+    \]
+    
+    Lower is better.
+    
+    \item \textbf{Task success}
+    
+    \[
+    \%\,\text{episodes completing the task}
+    \]
+    
+    Higher is better.
+\end{itemize}
+
+\column{0.5\textwidth}
+
+\textbf{Intervention quality}
+
+\begin{itemize}
+    \item \textbf{Shield activation rate}
+    
+    \[
+    \%\,\text{decisions rejected/repaired/fallback}
+    \]
+    
+    Lower is generally better.
+
+    \item \textbf{Intervention precision}
+    
+    Fraction of interventions that correspond to a
+    true future violation.
+    
+    Higher is better.
+\end{itemize}
+
+\end{columns}
+
+\vspace{7pt}
+
+\begin{alertblock}{Key trade-off}
+A good shield should reduce violations \textbf{without simply rejecting
+everything}.
+\end{alertblock}
+
+\end{frame}
+
+\begin{frame}[t,shrink=8]{Metrics II --- Runtime cost and value of intervention}
+
+\begin{columns}[T]
+
+\column{0.33\textwidth}
+
+\textbf{Latency}
+
+\[
+\text{median added ms / decision}
+\]
+
+Measures runtime overhead.
+
+\column{0.33\textwidth}
+
+\textbf{Conservatism cost}
+
+\[
+\Delta\text{Success}
+\]
+
+on episodes with no true safety event.
+
+Measures unnecessary task degradation.
+
+\column{0.33\textwidth}
+
+\textbf{Recovery rate}
+
+\[
+\frac{
+\text{successful tasks after intervention}
+}{
+\text{rejected-chunk cases}
+}
+\]
+
+Measures whether repair recovers task performance.
+
+\end{columns}
+
+\vspace{10pt}
+
+\begin{alertblock}{Why these metrics matter}
+Safety alone is insufficient:
+\[
+\boxed{
+\text{Safe}
+\;\not\Rightarrow\;
+\text{Useful}
+}
+\]
+
+A practical shield must be \textbf{safe, selective, recoverable, and fast}.
+\end{alertblock}
+
 \end{frame}
 
 %=====================================================================
 \section{Part 6 --- Guarantees \& Challenges}
 %=====================================================================
 
-\begin{frame}{Vì sao khó để có được các guarantee này?}
+\begin{frame}[t,shrink=8]{Vì sao khó để có được các guarantee này?}
 \begin{itemize}
     \item \textbf{Epsilon calibration}: calibrate $\varepsilon$ đúng theo phân phối thật, không phải một hằng số cố định.
     \item \textbf{Model error dưới distribution shift}: $\varepsilon$ sai dưới shift $\Rightarrow$ certificate sập âm thầm mà không cảnh báo.
@@ -411,7 +1079,7 @@ Phần lớn các khối thành phần đều có sẵn trong literature; cái m
 \textit{3 lát cắt khó xuyên suốt: khái niệm (đúng ranh giới tractable/intractable), toán học (đúng đắn dưới bất định mà không biết cấu trúc $\pi_\theta$), hệ thống ($<$10ms cạnh GPU policy).}
 \end{frame}
 
-\begin{frame}{Assumptions: điều kiện để guarantee đứng vững}
+\begin{frame}[t,shrink=8]{Assumptions: điều kiện để guarantee đứng vững}
 \begin{itemize}
     \item Mỗi challenge ở trên cần một giả định tương ứng để lý thuyết còn đứng vững:
     \item \textbf{Assumption 1}: reachable-set sound --- reachtube phải chứa quỹ đạo thật (đối phó với model error dưới distribution shift).
@@ -421,14 +1089,14 @@ Phần lớn các khối thành phần đều có sẵn trong literature; cái m
 \end{itemize}
 \end{frame}
 
-\begin{frame}{Từ Bounded-time đến All-time safety}
+\begin{frame}[t,shrink=8]{Từ Bounded-time đến All-time safety}
 \begin{itemize}
     \item \textbf{Theorem 1} (bounded-time safety): với 3 assumption trên, chunk được ShortStop chấp nhận không vi phạm $X_u$ trong $H$ bước tới.
     \item \textbf{Corollary 1} (all-time safety): quy nạp theo $t$ dựa trên $X_s$ bất biến --- an toàn từng bước cộng dồn thành an toàn suốt quỹ đạo.
 \end{itemize}
 \end{frame}
 
-\begin{frame}{Conservatism vs. Horizon}
+\begin{frame}[t,shrink=8]{Conservatism vs. Horizon}
 \begin{itemize}
     \item \textbf{Proposition 1} (Grönwall-type, Eq.~6--7): $r_k\le L^k r_0+(\varepsilon_{\max}+\bar w)\frac{L^k-1}{L-1}$, $\alpha(H)\le\alpha^\star+\beta(\epsilon+r_H)$.
     \item Đây chính là cơ sở toán học cho trực giác ``ngắn hạn vừa đủ vừa cần'' ở Part 3: $L^k$ tăng theo horizon $\Rightarrow$ tồn tại $H^\star$ tối ưu (thực nghiệm $H^\star=8$).
@@ -436,139 +1104,107 @@ Phần lớn các khối thành phần đều có sẵn trong literature; cái m
 \end{frame}
 
 %=====================================================================
-\section{Part 7 --- Evaluation Framework}
+\section{Track A \& Track B --- Kế hoạch song song}
 %=====================================================================
 
-\begin{frame}{Khung đánh giá cho một runtime shield}
+\begin{frame}[t,shrink=8]{Track A \& Track B: hai kế hoạch chạy song song}
 \begin{itemize}
-    \item Không gọi đây là ``Results'': số liệu LIBERO/ManiSkill2/RLBench hiện là \emph{model-derived projections} hiệu chỉnh theo rate công bố + đo 2D-sim, \textbf{không phải} full closed-loop simulator run thật (paper tự thừa nhận, Sec.~V.F).
-    \item Do nhiều thí nghiệm quy mô lớn hiện mới dừng ở mức projection, trọng tâm của phần này là khung đánh giá và các chỉ số được sử dụng.
+    \item \textbf{Track A (Lý thuyết)}: Sec.~I--IV --- bài toán, related work, method, các định lý an toàn, chia theo 7 nhóm chủ đề.
+    \item \textbf{Track B (Thực nghiệm)}: Sec.~V--VIII --- dựng pipeline trên \texttt{Reach-Avoid-2D} với policy Gaussian giả lập trước (stage 0--5), chỉ đưa generative policy thật vào từ stage 6a, rồi mới scale lên 3 benchmark thật (stage 7a--7c).
+    \item \textbf{Vì sao chưa đụng generative policy ngay}: shield logic (reach/STL/CE-search/repair/baselines) cần debug nhiều vòng --- Gaussian rẻ và nhanh hơn; policy thật chỉ cần thiết khi kiểm tra đúng giả định ``black-box proposer''.
+    \item 3 bảng dưới đây ghép mỗi stage Track B với nhóm lý thuyết Track A tương ứng, kèm status theo dõi.
 \end{itemize}
 \end{frame}
 
-\begin{frame}{Bộ metric: 3 nhóm}
-\begin{itemize}
-    \item \textbf{Safety metrics}: violation rate (\emph{đo tần suất vào $X_u$}), precision ($0.94$, \emph{đo shield có reject nhầm chunk an toàn không}).
-    \item \textbf{Utility metrics}: success rate (\emph{giữ được bao nhiêu \% nhiệm vụ hoàn thành}, $92\%$), recovery rate ($0.44\to0.78$ qua Phase~3--4, \emph{đo liveness --- reject rồi có phục hồi được không}).
-    \item \textbf{System metrics}: latency ($8.9$\,ms trung vị, \emph{đo chi phí cạnh GPU policy, có kịp real-time không}).
-    \item Đây là các metric xuất hiện trực tiếp trong tài liệu này (Table~III đầy đủ có 7 metric).
-\end{itemize}
+\begin{frame}[t,shrink=8]{Track A \& Track B: lộ trình song song (1/3)}
+\footnotesize
+\begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|}
+\hline
+\textbf{Track A} & \textbf{Status} & \textbf{Track B} & \textbf{Status} \\
+\hline
+\textbf{Stage 0} --- Reachability cơ bản (interval/zonotope, Minkowski sum, Lipschitz) + Shielding/Safe RL context (đọc nhanh). &
+In progress &
+Setup --- env \texttt{Reach-Avoid-2D}, interval arithmetic, \texttt{cvxpy}; policy Gaussian giả lập chỉ để dựng khung. &
+\good{Done} \\
+\hline
+\textbf{Stage 1} --- Reachtube \& Assumption 1 (sound over-approximation). &
+Chưa bắt đầu &
+Reach-only shield --- reachtube, binary reject (Gaussian; violation $\approx3.8\%$, success $\approx64.1\%$). &
+\good{Done} \\
+\hline
+\textbf{Stage 2} --- STL syntax \& robustness-to-go, Assumption 2. &
+Chưa bắt đầu &
+STL-to-go --- thay reject nhị phân bằng robustness lower bound (Gaussian; kỳ vọng $\approx2.9\%$ violation). &
+Chưa bắt đầu (tiếp theo) \\
+\hline
+\textbf{Stage 3} --- CEGIS: tìm counterexample (adversarial search). &
+Chưa bắt đầu &
+CE search --- projected gradient/vertex sampling trên box 2D (Gaussian; kỳ vọng $\approx1.7\%$ violation). &
+Chưa bắt đầu \\
+\hline
+\end{tabularx}
 \end{frame}
 
-\begin{frame}{Bộ baseline dùng để so sánh}
-\begin{itemize}
-    \item \texttt{Unshielded} --- không có shield, đường nền.
-    \item \texttt{Conf-Thresh} --- lọc theo ngưỡng tin cậy, không dùng reachability/STL.
-    \item \texttt{MPC-Filter}, \texttt{CBF-Shield}, \texttt{STL-Monitor} --- 3 baseline theo đúng 3 nhu cầu Predict/Certify/Repair (Part 5).
-    \item \texttt{ShortStop} --- ghép cả 3 nhu cầu trong 1 vòng per-decision.
-\end{itemize}
+\begin{frame}[t,shrink=8]{Track A \& Track B: lộ trình song song (2/3)}
+\footnotesize
+\begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|}
+\hline
+\textbf{Track A} & \textbf{Status} & \textbf{Track B} & \textbf{Status} \\
+\hline
+\textbf{Stage 4} --- CEGIS: sửa theo counterexample (trust-region projection). &
+Chưa bắt đầu &
+Repair --- Algorithm~1 đầy đủ (Gaussian; kỳ vọng $\approx1.2\%$ violation). &
+Chưa bắt đầu \\
+\hline
+\textbf{Stage 5} --- MPC/CBF \& fallback, Assumption 3 (safe fallback tồn tại). &
+Chưa bắt đầu &
+Baselines --- MPC-Filter, CBF-Shield, STL-Monitor, Conf-Thresh (vẫn trên Gaussian). &
+Chưa bắt đầu \\
+\hline
+\textbf{Stage 6a} --- Generative policy, bản nhỏ (Diffusion Policy/flow matching). &
+Chưa bắt đầu &
+2D policy thật --- train một diffusion/flow policy nhỏ trên \texttt{Reach-Avoid-2D}, hoặc import policy có sẵn. &
+Chưa bắt đầu \\
+\hline
+\textbf{Stage 6b} --- Safety guarantee (bounded-time $\to$ all-time, Grönwall trade-off). &
+Chưa bắt đầu &
+Metrics + stress test --- 7 metric, horizon sweep, bootstrap, \textbf{chạy lại với policy 2D thật thay Gaussian}. &
+Chưa bắt đầu \\
+\hline
+\end{tabularx}
 \end{frame}
 
-%=====================================================================
-\section{Track A --- Kế hoạch tìm hiểu lý thuyết}
-%=====================================================================
-
-\begin{frame}{Track A \& Track B: hai kế hoạch chạy song song}
-\begin{itemize}
-    \item \textbf{Track A (Lý thuyết)}: Sec.~I--IV --- bài toán, related work, method, các định lý an toàn.
-    \item \textbf{Track B (Thực nghiệm)}: Sec.~V--VIII --- dựng lại pipeline từ dễ (2D prototype) đến khó (LIBERO/ManiSkill2/RLBench).
-    \item \textbf{Vì sao song song}: Track B không cần chờ hiểu hết Track A --- chỉ cần xong Module 3 (Method) là đủ để bắt đầu code; ngược lại, code thực tế giúp hiểu Track A sâu hơn (ví dụ tự triển khai reachtube làm rõ Assumption~1).
-    \item \textbf{Nền tảng có sẵn} (từ paper MPC trước): mô hình động học, QP + Hildreth method, so sánh LQR, receding-horizon, cross-track error --- điểm tựa trực tiếp cho baseline \texttt{MPC-Filter} và trực giác receding-horizon của ShortStop.
-\end{itemize}
-\end{frame}
-
-\begin{frame}{Module 1--2: Bài toán \& Related Work (Sec.~I--II)}
-\begin{itemize}
-    \item \textbf{Module 1}: hiểu và diễn giải lại (nửa trang) ý tưởng cốt lõi ``không cần verify $\pi_\theta$, chỉ cần verify hậu quả 1 chunk''; liệt kê 4 bước P-R-C-S; nắm được các mục tiêu hiệu năng mà phương pháp hướng tới (18.7\%$\to$1.2\% violation, 92\% success giữ lại, 0.94 precision, 8.9\,ms latency). \textit{Ước lượng: 0.5--1 buổi.}
-    \item \textbf{Module 2}: định vị 7 nhánh literature --- phần D (MPC/CBF) nhanh vì đã có nền (baseline \texttt{MPC-Filter}, \texttt{CBF-Shield} đã đào sâu ở section trước); phần A/E/F/G (generative policy, reachability, STL, CEGIS) tốn thời gian hơn vì hoàn toàn mới. \textit{Ước lượng: 1.5--2 buổi.}
-\end{itemize}
-\end{frame}
-
-\begin{frame}{Module 3: Method --- 4 khối cần học sâu (Sec.~III)}
-\begin{itemize}
-    \item \textbf{(R) Reachtube} (Eq.~1): $\hat R_{k+1} = \hat f(\hat R_k, a_{t+k}) \oplus B(\varepsilon_k+\bar w)$ --- cần học Minkowski sum $\oplus$, interval/zonotope, Lipschitz của $\hat f$.
-    \item \textbf{(C) STL robustness-to-go} (Eq.~2): $\rho(\phi,\hat R) = \min_{0\le k\le H}\inf_{x\in\hat R_k}\mathrm{dist}(x,X_u)$ --- cần cú pháp STL cơ bản ($\square,\lozenge,\wedge,\vee$).
-    \item \textbf{(S) CE search + repair} (Eq.~3--4): $\arg\min_{k,\,x\in\hat R_k}\mathrm{dist}(x,X_u)$, hướng sửa $d=\nabla_a\,\mathrm{dist}(\cdot)$, chiếu về trust region $\delta$ --- có họ hàng với QP-with-constraints đã làm (khác ở chỗ đây là gradient step có chiếu, không phải QP kín).
-    \item \textbf{Kiểm tra mức độ hiểu}: trình bày lại Algorithm~1 từng bước mà không tham chiếu tài liệu gốc, trước khi sang Track B.
-\end{itemize}
+\begin{frame}[t,shrink=8]{Track A \& Track B: lộ trình song song (3/3)}
+\footnotesize
+\begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|}
+\hline
+\textbf{Track A} & \textbf{Status} & \textbf{Track B} & \textbf{Status} \\
+\hline
+\textbf{Stage 7a} --- Generative policy, scale lên (cùng nhóm với 6a). &
+Chưa bắt đầu &
+\textbf{LIBERO} --- swap sang env thật, long-horizon manipulation. &
+Chưa bắt đầu (tuỳ resource GPU) \\
+\hline
+\textbf{Stage 7b} --- Generative policy, scale lên (cùng nhóm với 6a). &
+Chưa bắt đầu &
+\textbf{ManiSkill2} --- swap sang env thật, contact-rich precision. &
+Chưa bắt đầu (tuỳ resource GPU) \\
+\hline
+\textbf{Stage 7c} --- Generative policy, scale lên (cùng nhóm với 6a). &
+Chưa bắt đầu &
+\textbf{RLBench} --- swap sang env thật, diverse manipulation tasks. &
+Chưa bắt đầu (tuỳ resource GPU) \\
+\hline
+\end{tabularx}
 \vspace{4pt}
-\footnotesize\textit{Ước lượng: 3--4 buổi --- module nặng nhất, đa số thời gian ở phần Reachtube/STL do khái niệm mới hoàn toàn.}
-\end{frame}
-
-\begin{frame}{Module 4: Lý thuyết an toàn (Sec.~IV + Phụ lục A)}
-\begin{itemize}
-    \item \textbf{Assumption 1--3}: reachable-set sound, STL bound sound, safe fallback ($\pi_{fb}, X_s$) tồn tại --- ghi rõ vì sao mỗi assumption cần thiết (theorem sập ở đâu nếu thiếu).
-    \item \textbf{Theorem 1} (bounded-time safety) $\to$ \textbf{Corollary 1} (all-time safety, quy nạp theo $t$ dựa trên $X_s$ bất biến).
-    \item \textbf{Proposition 1} (Grönwall-type, Eq.~6--7): $r_k\le L^k r_0+(\varepsilon_{\max}+\bar w)\frac{L^k-1}{L-1}$, $\alpha(H)\le\alpha^\star+\beta(\epsilon+r_H)$ --- giải thích vì sao có interior-optimum $H^\star=8$.
-    \item \textbf{Kiểm tra mức độ hiểu}: trình bày lại chứng minh Theorem~1 mà không tham chiếu Phụ lục A.A, sau đó đối chiếu kết quả.
-\end{itemize}
-\vspace{4pt}
-\footnotesize\textit{Ước lượng: 2--3 buổi --- phần quy nạp/Grönwall là mảng toán mới, cần thời gian riêng nếu chưa quen.}
-\end{frame}
-
-\begin{frame}{Lộ trình làm quen khái niệm mới (song song, không phải track riêng)}
-\begin{itemize}
-    \item \textbf{Diffusion/flow-matching}: đủ hiểu sampler sinh action chunk, không cần sâu training DDPM --- cho Module 1--3.
-    \item \textbf{Reachability} (interval/zonotope, Minkowski sum, Lipschitz): đủ để tự triển khai interval propagation 2D --- cho Module 3.D, 4.
-    \item \textbf{STL} (cú pháp, robustness): đủ để tự triển khai $\square,\lozenge$ trên tube --- cho Module 3.E.
-    \item \textbf{CEGIS/CEGAR, falsification}: trực giác ``phản ví dụ để bác bỏ + sửa'', không cần đọc full CEGIS paper --- cho Module 3.F.
-    \item \textbf{Control Barrier Functions}: đủ để code 1 barrier tròn 2D --- cho baseline \texttt{CBF-Shield}.
-\end{itemize}
-\vspace{4pt}
-\textit{Nguyên tắc: học vừa đủ dùng (just-in-time), gắn trực tiếp với module/phase đang cần --- không học toàn bộ lý thuyết trước khi code.}
-\end{frame}
-
-%=====================================================================
-\section{Track B --- Kế hoạch thực nghiệm / implement}
-%=====================================================================
-
-\begin{frame}{Nguyên tắc Track B: bám theo đúng ablation, dễ $\to$ khó}
-\begin{itemize}
-    \item Paper tự cho lộ trình dễ$\to$khó có sẵn: Reach-only $\to$ +STL-to-go $\to$ +CE search $\to$ +Repair (Table~III, Sec.~VII.A).
-    \item Dựng trước trên \texttt{Reach-Avoid-2D} (nhẹ nhất, chính là môi trường prototype gốc của paper) trước khi leo lên LIBERO/ManiSkill2/RLBench.
-    \item Track B không cần chờ Track A xong hết --- chỉ cần xong Module 3 là đủ bắt đầu code; ngược lại code sẽ giúp hiểu Track A sâu hơn.
-\end{itemize}
-\end{frame}
-
-\begin{frame}{Phase 0--1: Setup + Reach-Avoid-2D (\good{đã xong})}
-\begin{itemize}
-    \item \textbf{Phase 0}: Python env, interval arithmetic tự viết (2D, bám sát Eq.~1), STL recursion tự triển khai (bám sát Eq.~2), \texttt{cvxpy} cho baseline QP.
-    \item \textbf{Phase 1}: point-mass 2D vài obstacle tròn, propagation box đơn giản, Reach-only rejector (reject nếu $\hat R_k\cap X_u\ne\emptyset$), policy giả lập (Gaussian chunk quanh reference).
-    \item \textbf{Trạng thái}: đã code + test xong --- \texttt{shortstop/\{env,reach,policy,shield,metrics\}.py} + \texttt{scripts/run\_phase1.py}, pytest pass, chạy 500 episode, in 6/7 metric.
-    \item Mốc kỳ vọng tái lập (Table~III dòng 1): violation $\approx 3.8\%$, success $\approx 64.1\%$.
-\end{itemize}
-\end{frame}
-
-\begin{frame}{Phase 2--3: STL robustness-to-go + Counterexample search}
-\begin{itemize}
-    \item \textbf{Phase 2}: thay điều kiện reject nhị phân bằng $\rho(\phi,\hat R)$ (Eq.~2) --- kỳ vọng violation $\approx 2.9\%$, success $\approx 66.0\%$.
-    \item \textbf{Phase 3}: inner adversarial search (Eq.~3) bằng projected gradient/vertex sampling trên box 2D --- kỳ vọng $\approx 1.7\%$ violation, $0.44$ recovery.
-    \item \textbf{Trạng thái}: chưa bắt đầu --- sẽ được triển khai sau khi Phase 0--1 hoàn tất review.
-\end{itemize}
-\end{frame}
-
-\begin{frame}{Phase 4--5: Repair + đủ 7 metric + baselines + stress test}
-\begin{itemize}
-    \item \textbf{Phase 4}: repair loop đầy đủ (Eq.~4, Algorithm~1) --- kỳ vọng $\approx 1.2\%$ violation, $0.78$ recovery (full match Table~III); cài đủ 7 metric; baseline Unshielded/Conf-Thresh/MPC-Filter/STL-Monitor/CBF-Shield.
-    \item \textbf{Phase 5}: stress test (object-placement/timing/visual-shift), horizon sweep $H$ (kiểm tra interior-optimum), paired bootstrap ($10^4$ resample).
-    \item Latency tham chiếu khi code: $K{=}8,H{=}8,M{=}16 \Rightarrow$ paper báo cáo trung vị \textbf{8.9\,ms}.
-\end{itemize}
-\end{frame}
-
-\begin{frame}{Phase 6: Leo lên môi trường thật (tuỳ resource GPU)}
-\begin{itemize}
-    \item Train/nạp một diffusion policy thật trên suite nhỏ của LIBERO hoặc ManiSkill2; thay policy giả lập ở Phase 1--5, lặp lại toàn bộ pipeline.
-\end{itemize}
-\begin{alertblock}{Lưu ý quan trọng (paper tự thừa nhận, Sec.~V.F)}
-Số liệu LIBERO/ManiSkill2/RLBench (Table~II, IV, V) là \emph{model-derived projections} hiệu chỉnh theo rate công bố + đo 2D-sim --- \textbf{không phải} full closed-loop simulator run thật. $\Rightarrow$ đây là phần tốn công nhất, và cũng là chỗ có thể đóng góp thật (chạy full simulator) nếu muốn mở rộng.
-\end{alertblock}
+\footnotesize\textit{Số liệu LIBERO/ManiSkill2/RLBench trong Part 5 hiện là projection, không phải full simulator run --- stage 7a--7c chính là phần lấp khoảng trống đó.}
 \end{frame}
 
 %=====================================================================
 \section{Tổng kết}
 %=====================================================================
 
-\begin{frame}{Tóm tắt}
+\begin{frame}[t,shrink=8]{Tóm tắt}
 \begin{itemize}
     \item \textbf{Insight}: verify hậu quả ngắn hạn của 1 chunk, không verify cả policy.
     \item \textbf{Cơ chế}: reachtube sound + STL robustness-to-go + counterexample-guided reject/repair.
