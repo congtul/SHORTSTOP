@@ -19,6 +19,12 @@ def aggregate(episode_logs):
 
     all_latencies = [t for e in episode_logs for t in e.get("latencies_ms", [])]
     latency_ms_median = float(np.median(all_latencies)) if all_latencies else None
+    # Median alone can hide a heavy tail (e.g. a repair path that only
+    # kicks in on <50% of steps but costs much more when it does) --
+    # mean and p95 catch that shape shift; see shortstop/shield.py's
+    # RepairShield discussion of activation-rate-driven latency artifacts.
+    latency_ms_mean = float(np.mean(all_latencies)) if all_latencies else None
+    latency_ms_p95 = float(np.percentile(all_latencies, 95)) if all_latencies else None
 
     total_rejected = sum(e.get("rejected_total", 0) for e in episode_logs)
     total_truly_unsafe = sum(e.get("rejected_truly_unsafe", 0) for e in episode_logs)
@@ -38,6 +44,8 @@ def aggregate(episode_logs):
         "success_rate": success_rate,
         "shield_activation_rate": activation_rate,
         "latency_ms_median": latency_ms_median,
+        "latency_ms_mean": latency_ms_mean,
+        "latency_ms_p95": latency_ms_p95,
         "intervention_precision": intervention_precision,
         "recovery_rate": recovery_rate,
     }

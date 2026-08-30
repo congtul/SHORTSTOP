@@ -57,8 +57,9 @@ def test_ce_shield_reports_counterexample_for_rejected_chunk_only():
 
 def test_repair_shield_fixes_a_near_miss_chunk():
     """Algorithm 1 only takes *one* gradient step per rejected candidate, so
-    this obstacle placement must be fixable in a single step for the test to
-    be meaningful -- not something requiring multiple rounds.
+    this obstacle placement must be fixable in a single step (of size
+    step_size, projected into trust_region) for the test to be meaningful --
+    not something requiring multiple rounds.
     """
     obstacle = Obstacle(center=[0.5, 0.15], radius=0.3)
     shield = RepairShield(
@@ -67,7 +68,8 @@ def test_repair_shield_fixes_a_near_miss_chunk():
         dt=0.1,
         w_bar=0.0,
         epsilon=0.05,
-        trust_region=0.6,
+        trust_region=1.5,
+        step_size=0.5,
     )
     chunk = np.tile([1.0, 0.0], (8, 1))
 
@@ -81,16 +83,17 @@ def test_repair_shield_fixes_a_near_miss_chunk():
 
 def test_repair_shield_default_matches_algorithm_1_single_shot():
     """Algorithm 1 gives up after one failed repair attempt -- no retry.
-    This obstacle placement needs >=2 rounds to fix, so the paper-faithful
-    default (max_repair_iters=1) must fail it, while explicitly asking for
-    more rounds (a CEGIS-style extension beyond the paper) succeeds.
+    This obstacle placement needs >=3 rounds of the same step_size to clear,
+    so the paper-faithful default (max_repair_iters=1) must fail it, while
+    explicitly asking for more rounds (a CEGIS-style extension beyond the
+    paper) succeeds.
     """
     obstacle = Obstacle(center=[0.4, 0.15], radius=0.3)
     chunk = np.tile([1.0, 0.0], (8, 1))
 
     default_shield = RepairShield(
         goal=[5.0, 0.0], obstacles=[obstacle], dt=0.1, w_bar=0.0,
-        epsilon=0.05, trust_region=0.6,
+        epsilon=0.05, trust_region=1.5, step_size=0.25,
     )
     _, info = default_shield.select([0.0, 0.0], [chunk])
     assert info["fallback"]
@@ -98,7 +101,7 @@ def test_repair_shield_default_matches_algorithm_1_single_shot():
 
     multi_round_shield = RepairShield(
         goal=[5.0, 0.0], obstacles=[obstacle], dt=0.1, w_bar=0.0,
-        epsilon=0.05, trust_region=0.6, max_repair_iters=3,
+        epsilon=0.05, trust_region=1.5, step_size=0.25, max_repair_iters=3,
     )
     _, info = multi_round_shield.select([0.0, 0.0], [chunk])
     assert not info["fallback"]

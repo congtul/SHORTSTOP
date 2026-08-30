@@ -113,18 +113,45 @@ class RepairShield(CEShield):
     of Stage 3's counterexample search (CEShield._diagnose) rather than
     re-deriving it.
 
+    Eq. 4 has *two* separate knobs that the paper's Table VII also lists
+    separately (step size eta=0.05, trust region delta=0.1):
+    a' = Proj_{A,delta}(a + eta * d) -- eta controls how big one gradient
+    step is, delta caps how far the *cumulative* repair is allowed to drift
+    from the original candidate. Collapsing them into a single
+    "trust_region" (as an earlier version of this class did, using it
+    directly as the step length) is not faithful to Eq. 4: it means every
+    repair moves by exactly the trust-region radius instead of taking a
+    small step within it.
+
     With max_repair_iters=1 (the default), this matches Algorithm 1 lines
     7-13 exactly: a rejected candidate gets *one* counterexample-guided
     gradient step (Eq. 4), projected into a trust region
-    ||delta_a|| <= trust_region, then *one* re-certification. If that's not
-    enough, the paper simply drops the candidate -- no retry.
+    ||a' - a_original|| <= trust_region, then *one* re-certification. If
+    that's not enough, the paper simply drops the candidate -- no retry.
 
     max_repair_iters > 1 goes *beyond* the paper: it repeats the
     counterexample-search-then-repair cycle (in the spirit of classic CEGIS,
     which iterates until no counterexample remains), re-localizing a new
     counterexample after each unsuccessful step instead of giving up after
-    one attempt. Algorithm 1 does not specify this -- treat it as an
-    experimental knob, not the paper-faithful default.
+    one attempt, with every step still projected back to the same trust
+    region around the *original* candidate. Algorithm 1 does not specify
+    this -- treat it as an experimental knob, not the paper-faithful
+    default.
+
+    A latency footgun this class exposes: `shield_activation_rate` here
+    reflects usability *after* repair, so a candidate that Stage 3 would
+    have flagged as rejected can show up here as "no activation" once
+    repaired -- for the exact same underlying obstacle difficulty. Because
+    shortstop.metrics.aggregate()'s `latency_ms_median` is a median over
+    *every* decision step, if that lowered activation rate pushes the
+    fraction of "had to diagnose/repair" steps below 50%, the median stops
+    reflecting the expensive branch at all, even though the mean/p95 still
+    do. This is exactly what made an earlier (now-fixed) version of this
+    pipeline look like "Stage 4 is faster than Stage 3" -- it wasn't; a
+    redundant reachtube recomputation in CEShield.select() was inflating
+    Stage 3's own cost on top of the median-hiding-tail effect. Always read
+    latency_ms_mean/latency_ms_p95 alongside the median when comparing
+    stages with different activation rates.
 
     Note: `info["admissible_mask"]` here reflects final usability *after*
     repair, not the original candidate -- a chunk that started unsafe but was
@@ -140,11 +167,13 @@ class RepairShield(CEShield):
         model_error=0.0,
         epsilon=0.05,
         trust_region=0.3,
+        step_size=0.05,
         max_repair_iters=1,
         max_action_norm=1.0,
     ):
         super().__init__(goal, obstacles, dt, w_bar, model_error, epsilon)
         self.trust_region = trust_region
+        self.step_size = step_size
         self.max_repair_iters = max_repair_iters
         self.max_action_norm = max_action_norm
 
@@ -165,13 +194,27 @@ class RepairShield(CEShield):
         direction = direction / norm if norm > 1e-9 else np.array([1.0, 0.0])
         return k_star, direction
 
+    def _project_to_trust_region(self, chunk, original):
+        """Pi_{A,delta} in Eq. 4: cap the total deviation from the original
+        candidate to an L2 ball of radius trust_region, then clip to the
+        action-magnitude bound. Measured over the whole chunk (rather than
+        only the entries touched so far) since a later iteration may move a
+        different prefix (a new k_star) than an earlier one did."""
+        delta = chunk - original
+        norm = np.linalg.norm(delta)
+        if norm > self.trust_region:
+            delta = delta * (self.trust_region / norm)
+        return np.clip(original + delta, -self.max_action_norm, self.max_action_norm)
+
     def _repair(self, state, chunk, counterexample):
         """Counterexample-guided repair, starting from Stage 3's
         counterexample. With max_repair_iters=1 (default) this is exactly
-        Algorithm 1's single gradient step + single re-certification; with
+        Algorithm 1's single gradient step (size eta) + single
+        re-certification, projected into the trust region; with
         max_repair_iters > 1 it re-localizes a new counterexample after each
         failed step and tries again (CEGIS-style extension, see class
         docstring). Returns (repaired chunk, success)."""
+        original = chunk.copy()
         chunk = chunk.copy()
         ce = counterexample
         for _ in range(self.max_repair_iters):
@@ -179,10 +222,8 @@ class RepairShield(CEShield):
 
             # d(x_k)/d(a_i) = dt * I for every i < k_star (Eq. 4): the
             # gradient nudges every action up to the violating step equally.
-            step = self.trust_region * direction
-            chunk[:k_star] = np.clip(
-                chunk[:k_star] + step, -self.max_action_norm, self.max_action_norm
-            )
+            chunk[:k_star] = chunk[:k_star] + self.step_size * direction
+            chunk = self._project_to_trust_region(chunk, original)
 
             tube = propagate_tube(state, chunk, self.dt, self.w_bar, self.model_error)
             if robustness_to_go(tube, self.obstacles) >= self.epsilon:

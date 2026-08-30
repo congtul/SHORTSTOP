@@ -44,6 +44,7 @@ def run_episode(
     n_candidates=8,
     dt=0.1,
     w_bar=0.02,
+    shield_w_bar=None,
     record_decisions=False,
 ):
     """Run one episode under `shield_factory`.
@@ -51,11 +52,19 @@ def run_episode(
     `shield_factory(goal, obstacles, dt, w_bar) -> shield instance`, or
     `None` for the Unshielded baseline (first action of the first candidate
     is executed with no filtering at all).
+
+    `w_bar` is the *true* disturbance bound used to generate the env's
+    actual noise. `shield_w_bar`, if given, is what the shield is told to
+    certify against instead -- defaults to `w_bar` (the shield gets the
+    ground truth for free), but pass a value from
+    shortstop.calibration.calibrate_w_bar() to certify against a realistic,
+    data-driven estimate instead (see Table VII's calibration recipe).
     """
     start, goal, obstacles = make_scenario(rng)
     env = ReachAvoid2D(start=start, goal=goal, obstacles=obstacles, dt=dt, w_bar=w_bar, rng=rng)
     policy = GaussianChunkPolicy(goal=goal, horizon=horizon, n_candidates=n_candidates, rng=rng)
-    shield = shield_factory(goal, obstacles, dt, w_bar) if shield_factory is not None else None
+    certified_w_bar = w_bar if shield_w_bar is None else shield_w_bar
+    shield = shield_factory(goal, obstacles, dt, certified_w_bar) if shield_factory is not None else None
 
     state = env.reset()
     trajectory = [state.copy()]
@@ -128,4 +137,5 @@ def run_episode(
         "decisions": decisions,
         "dt": dt,
         "w_bar": w_bar,
+        "shield_w_bar": certified_w_bar,
     }

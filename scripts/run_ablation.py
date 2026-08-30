@@ -24,6 +24,24 @@ move again at Stage 4 (RepairShield), where rejected candidates can actually
 be fixed instead of discarded. This is a modeling choice specific to this
 prototype (see docstrings), not a bug -- the paper's own exact percentages
 depend on an env configuration it doesn't fully specify (see run_phase1.py).
+
+Note: with USE_CALIBRATED_W_BAR=True (default), every certified stage
+certifies against a *calibrated* disturbance bound (shortstop.calibration,
+Table VII's "high-quantile residual x safety factor" recipe) rather than the
+ground-truth TRUE_W_BAR handed to it for free. This is more realistic (a
+real deployed shield does not know the true noise bound) but does mean
+recovery/activation numbers move a little run to run depending on the
+calibration sample; set it to False to go back to the privileged/ground-
+truth w_bar used before calibration was added.
+
+Note: STEP_SIZE/TRUST_REGION (Eq. 4's eta/delta) default here to values
+*tuned for this prototype's scale*, not the paper's literal Table VII
+numbers (eta=0.05, delta=0.1) -- this prototype's units (obstacle radius
+~0.4-0.8, action magnitude ~1.0) are not calibrated to the paper's
+real-world cm scale (see run_phase1.py's "reproducibility note" below), so
+the paper's literal eta=0.05 step rarely clears an obstacle here. See the
+comment above STEP_SIZE's definition for the sweep that picked these
+defaults, and how to switch back to the paper's literal values.
 """
 import json
 import sys
@@ -33,17 +51,45 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from shortstop.experiment import run_episode
+from shortstop.calibration import calibrate_w_bar
+from shortstop.env import ReachAvoid2D
+from shortstop.experiment import make_scenario, run_episode
 from shortstop.metrics import aggregate, conservatism_cost
 from shortstop.shield import CEShield, ReachOnlyShield, RepairShield, STLShield
 
 # Shared knobs across every certified stage (Stage 2+), so the only thing that
 # changes row to row is the shield *logic*, not its tuning.
-EPSILON = 0.05           # STL certification margin
-TRUST_REGION = 0.3       # ||delta_a|| bound per repair step (Stage 4)
+EPSILON = 0.05           # STL certification margin (paper's fixed "margin epsilon", Table VII)
+
+# eta/delta (Eq. 4): the paper's literal Table VII values are eta=0.05,
+# delta=0.1. Kept here at values *tuned for this prototype's scale* instead
+# (obstacle radius ~0.4-0.8, action magnitude ~1.0 -- not the paper's cm
+# scale), so Stage 4 actually demonstrates repair on this environment rather
+# than almost always falling back. A 150-episode sweep at max_repair_iters=1
+# (see shortstop/shield.py's RepairShield docstring for what eta/delta mean):
+#   step_size=0.05 (paper's eta), trust_region=0.3  -> recovery  6.1%
+#   step_size=0.15,               trust_region=0.5  -> recovery 11.6%
+#   step_size=0.30,               trust_region=1.0  -> recovery 17.1%  <- picked
+#   step_size=0.50,               trust_region=1.5  -> recovery 26.8%
+#   step_size=0.60,               trust_region=2.0  -> recovery 32.5%
+# violation_rate stayed ~0.7-1.3% across all of them -- a bigger step makes
+# repair succeed more often, it does not weaken certification (every repaired
+# chunk is still re-certified before being accepted). Raise these two if you
+# want Stage 4 to show a stronger recovery effect; set them to 0.05/0.1 to
+# reproduce the paper's literal hyperparameters instead.
+TRUST_REGION = 1.0
+STEP_SIZE = 0.3
 MAX_REPAIR_ITERS = 1     # Algorithm 1's default: one gradient step, no retry.
                          # >1 is a CEGIS-style extension beyond the paper --
                          # see RepairShield's docstring in shortstop/shield.py.
+
+# Table VII's calibration recipe applied to this prototype's disturbance bound
+# (see shortstop/calibration.py for why w_bar rather than a model-error term).
+TRUE_W_BAR = 0.02              # ground-truth noise level the env actually uses
+USE_CALIBRATED_W_BAR = True    # False = shields get TRUE_W_BAR for free (old behavior)
+CALIBRATION_EPISODES = 200
+CALIBRATION_QUANTILE = 0.99
+CALIBRATION_SAFETY_FACTOR = 1.25
 
 STAGES = {
     "unshielded": None,
@@ -63,13 +109,22 @@ STAGES = {
         w_bar=w_bar,
         epsilon=EPSILON,
         trust_region=TRUST_REGION,
+        step_size=STEP_SIZE,
         max_repair_iters=MAX_REPAIR_ITERS,
     ),
 }
 
 
-def run_stage(shield_factory, n_episodes, seed_offset=1000):
-    return [run_episode(shield_factory, np.random.default_rng(seed_offset + i)) for i in range(n_episodes)]
+def run_stage(shield_factory, n_episodes, seed_offset=1000, shield_w_bar=None):
+    return [
+        run_episode(
+            shield_factory,
+            np.random.default_rng(seed_offset + i),
+            w_bar=TRUE_W_BAR,
+            shield_w_bar=shield_w_bar,
+        )
+        for i in range(n_episodes)
+    ]
 
 
 def fmt_pct(x):
@@ -83,7 +138,32 @@ def fmt_num(x, digits=3):
 def main():
     n_episodes = 500
 
-    logs_by_stage = {name: run_stage(factory, n_episodes) for name, factory in STAGES.items()}
+    shield_w_bar = None
+    if USE_CALIBRATED_W_BAR:
+        calib_rng = np.random.default_rng(999)
+
+        def make_env():
+            start, goal, obstacles = make_scenario(calib_rng)
+            return ReachAvoid2D(
+                start=start, goal=goal, obstacles=obstacles, dt=0.1, w_bar=TRUE_W_BAR, rng=calib_rng
+            )
+
+        shield_w_bar = calibrate_w_bar(
+            make_env,
+            n_episodes=CALIBRATION_EPISODES,
+            quantile=CALIBRATION_QUANTILE,
+            safety_factor=CALIBRATION_SAFETY_FACTOR,
+            rng=calib_rng,
+        )
+        print(
+            f"Calibrated w_bar = {shield_w_bar:.4f} (true w_bar = {TRUE_W_BAR}) from "
+            f"{CALIBRATION_EPISODES} held-out episodes "
+            f"[{CALIBRATION_QUANTILE:.0%} quantile x {CALIBRATION_SAFETY_FACTOR} safety factor]\n"
+        )
+
+    logs_by_stage = {
+        name: run_stage(factory, n_episodes, shield_w_bar=shield_w_bar) for name, factory in STAGES.items()
+    }
     metrics_by_stage = {name: aggregate(logs) for name, logs in logs_by_stage.items()}
 
     baseline_logs = logs_by_stage["unshielded"]
@@ -97,7 +177,9 @@ def main():
         ("violation", 10, lambda m: fmt_pct(m["violation_rate"])),
         ("success", 10, lambda m: fmt_pct(m["success_rate"])),
         ("activation", 11, lambda m: fmt_pct(m["shield_activation_rate"])),
-        ("latency_ms", 11, lambda m: fmt_num(m["latency_ms_median"])),
+        ("lat_median", 11, lambda m: fmt_num(m["latency_ms_median"])),
+        ("lat_mean", 10, lambda m: fmt_num(m["latency_ms_mean"])),
+        ("lat_p95", 9, lambda m: fmt_num(m["latency_ms_p95"])),
         ("precision", 10, lambda m: fmt_pct(m["intervention_precision"])),
         ("recovery", 10, lambda m: fmt_pct(m["recovery_rate"])),
         ("cons.cost", 10, lambda m: fmt_pct(m.get("conservatism_cost"))),

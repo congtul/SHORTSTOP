@@ -60,15 +60,19 @@ SHORTSTOP/
 │   ├── stl.py                    # robustness_to_go() + find_counterexample() theo công thức (2)-(3)
 │   ├── shield.py                 # ReachOnlyShield / STLShield / CEShield / RepairShield (Stage 1-4)
 │   ├── experiment.py             # run_episode() dùng chung cho mọi stage (cùng seed để so sánh công bằng)
-│   └── metrics.py                # 7 metric: violation/success/activation/latency/precision/recovery/cons.cost
+│   ├── calibration.py            # calibrate_w_bar(): Table VII's high-quantile calibration recipe
+│   └── metrics.py                # 7 metric + latency mean/p95: violation/success/activation/latency/precision/recovery/cons.cost
 ├── scripts/
 │   ├── run_phase1.py             # Thực nghiệm Stage 1 riêng (tên file giữ từ "Phase 1" cũ) + vẽ hình
-│   └── run_ablation.py           # Bảng so sánh Unshielded + Stage 1-4 cùng lúc (config = dict STAGES)
+│   ├── run_ablation.py           # Bảng so sánh Unshielded + Stage 1-4 cùng lúc (config = dict STAGES)
+│   └── run_horizon_sweep.py      # Quét certified horizon H (conservatism-horizon trade-off, Fig. 4)
 ├── tests/                        # pytest cho từng module
 │   ├── test_env.py
 │   ├── test_reach.py
 │   ├── test_stl.py
-│   └── test_shield.py
+│   ├── test_shield.py
+│   ├── test_calibration.py
+│   └── test_metrics.py
 ├── results/                      # Output khi chạy script (gitignore, tự sinh)
 ├── requirements.txt
 └── .gitignore
@@ -93,6 +97,22 @@ lần, không đạt thì bỏ candidate luôn, không thử lại. Đặt `max_
 1` là mở rộng **vượt ra ngoài paper** (theo tinh thần CEGIS cổ điển: lặp lại
 tìm-counterexample-rồi-sửa nhiều vòng cho tới khi hết counterexample) — dùng
 để thử nghiệm, không phải hành vi mặc định khi so khớp với paper.
+
+Công thức (4) của paper thật ra có **2** tham số riêng biệt (Table VII:
+`η=0.05`, `δ=0.1`), không phải một: `a' = Π_{A,δ}(a + η·d)`. `RepairShield`
+tách đúng như vậy — `step_size` (η) là độ lớn mỗi bước gradient,
+`trust_region` (δ) là bán kính chặn **tổng độ lệch tích lũy** so với
+candidate gốc, không phải độ lớn mỗi bước.
+
+Vì scale hành động của prototype 2D này (radius obstacle ~0.4–0.8, action
+magnitude ~1.0) không cùng đơn vị với paper (cm), giá trị `η=0.05`/`δ=0.1`
+"đúng paper" khá nhỏ so với những gì cần để sửa một va chạm (sweep 150
+episode: recovery chỉ ~6%). `run_ablation.py` nên mặc định
+**`step_size=0.3`, `trust_region=1.0`** — tune riêng cho scale prototype này
+(recovery ~17%, violation rate không đổi vì mọi chunk sửa xong vẫn bị
+certify lại như cũ) — không phải số của paper. Đặt lại `0.05`/`0.1` trong
+file đó nếu muốn tái lập đúng hyperparameter của paper (xem comment ngay
+trên khai báo `STEP_SIZE` để biết bảng sweep đầy đủ).
 
 **Lưu ý quan trọng**: trong bản 2D này, Stage 2 và Stage 3 ra **cùng** kết quả
 an toàn (`CEShield` chỉ thêm chẩn đoán counterexample, không đổi quyết định
@@ -136,7 +156,7 @@ shield reject/fallback logic):
 pytest tests/ -v
 ```
 
-Kỳ vọng: 15/15 test pass.
+Kỳ vọng: 19/19 test pass.
 
 **Chạy thực nghiệm Stage 1 riêng** (có vẽ hình trajectory + decision snapshot):
 
@@ -158,10 +178,35 @@ python scripts/run_ablation.py
 
 Script chạy `Unshielded` + `Stage 1` (`ReachOnlyShield`) + `Stage 2`
 (`STLShield`) + `Stage 3` (`CEShield`) + `Stage 4` (`RepairShield`) trên
-**cùng một bộ seed** (nhờ `shortstop/experiment.py` dùng chung), in bảng 8
-cột (violation/success/activation/latency/precision/recovery/cons.cost) và
-lưu bản JSON vào `results/ablation.json`. Thêm stage mới chỉ cần thêm 1 dòng
+**cùng một bộ seed** (nhờ `shortstop/experiment.py` dùng chung), in bảng
+(violation/success/activation/lat_median/lat_mean/lat_p95/precision/recovery/cons.cost —
+3 cột latency vì median một mình có thể che mất đuôi phân phối đắt, xem giải
+thích ở docstring `RepairShield` trong `shortstop/shield.py`) và lưu bản
+JSON vào `results/ablation.json`. Thêm stage mới chỉ cần thêm 1 dòng
 vào dict `STAGES` ở đầu file — không phải sửa logic chạy episode.
+
+Mặc định (`USE_CALIBRATED_W_BAR=True`), script còn tự **calibrate** disturbance
+bound `w_bar` mà shield được certify theo (`shortstop/calibration.py`, đúng
+công thức Table VII "high-quantile residual × safety factor"), thay vì đưa
+thẳng giá trị `w_bar` thật (ground-truth) cho shield như trước — vì một
+shield triển khai thực tế không biết trước nhiễu thật của môi trường. Tham
+số `CALIBRATION_EPISODES`/`CALIBRATION_QUANTILE`/`CALIBRATION_SAFETY_FACTOR`
+ở đầu file điều khiển việc này; đặt `USE_CALIBRATED_W_BAR=False` để quay lại
+hành vi cũ (privileged w_bar).
+
+**Quét certified horizon H (conservatism–horizon trade-off, Fig. 4)**:
+
+```bash
+python scripts/run_horizon_sweep.py
+```
+
+Paper chứng minh (Prop. 1) và quan sát (Fig. 4) rằng khi H tăng, violation
+giảm mạnh rồi bão hòa, còn activation/latency tăng đơn điệu — tồn tại một
+"điểm ngọt" (paper: H≈8). Script này quét `HORIZONS` (mặc định
+`[4,6,8,10,12,16]`) cho các stage trong `SWEEP_STAGES` (mặc định Stage 1 +
+Stage 4) để xem prototype 2D này có tái hiện đúng hình dạng đường cong đó
+không — H tối ưu không nhất thiết trùng H=8 của paper vì scale
+obstacle/policy khác nhau. Kết quả lưu vào `results/horizon_sweep.json`.
 
 **Lưu ý về số liệu**: violation/success rate in ra sẽ không khớp hệt Table
 III của paper (3.8% / 64.1% / 2.9% / 1.7% / 1.2% qua từng stage), vì paper

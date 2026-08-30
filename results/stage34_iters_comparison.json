@@ -1,0 +1,41 @@
+{
+  "stage3_ce_search": {
+    "n_episodes": 300,
+    "violation_rate": 0.0033333333333333335,
+    "success_rate": 0.24,
+    "shield_activation_rate": 0.7307187071866392,
+    "latency_ms_median": 1.640500035136938,
+    "intervention_precision": 0.4641329160808502,
+    "recovery_rate": null,
+    "conservatism_cost": 0.15625,
+    "latency_ms_mean": 1.5899860003196051,
+    "activated_steps": 42380,
+    "total_steps": 52037
+  },
+  "stage4_repair(iters=1)": {
+    "n_episodes": 300,
+    "violation_rate": 0.01,
+    "success_rate": 0.4866666666666667,
+    "shield_activation_rate": 0.5240147187718117,
+    "latency_ms_median": 3.347150020999834,
+    "intervention_precision": 0.9097759971022303,
+    "recovery_rate": 0.15852699770433032,
+    "conservatism_cost": 0.046875,
+    "latency_ms_mean": 2.7510928501777423,
+    "activated_steps": 29401,
+    "total_steps": 44240
+  },
+  "stage4_repair(iters=3)": {
+    "n_episodes": 300,
+    "violation_rate": 0.016666666666666666,
+    "success_rate": 0.5233333333333333,
+    "shield_activation_rate": 0.47287691589621567,
+    "latency_ms_median": 6.713000009767711,
+    "intervention_precision": 0.938762147632504,
+    "recovery_rate": 0.1909598781107161,
+    "conservatism_cost": 0.046875,
+    "latency_ms_mean": 4.804623676724767,
+    "activated_steps": 26420,
+    "total_steps": 42396
+  }
+}
