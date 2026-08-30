@@ -6,11 +6,12 @@ def aggregate(episode_logs):
 
     Each log needs 'violated', 'reached', 'shield_activations', 'steps'.
     Optional (present only for shielded runs): 'latencies_ms',
-    'rejected_total', 'rejected_truly_unsafe' -- see run_phase1.py.
+    'rejected_total', 'rejected_truly_unsafe', 'repair_attempts',
+    'repair_successes' -- see shortstop/experiment.py.
 
-    Recovery rate (7th metric) is intentionally not computed here: it
-    compares plain reject vs. repair, and there is no repair mechanism
-    until Phase 4.
+    Recovery rate (7th metric) is only meaningful once a repair mechanism
+    exists (Stage 4, shortstop.shield.RepairShield): it compares plain
+    reject vs. repair, so it's None for any stage without repair data.
     """
     violation_rate = float(np.mean([e["violated"] for e in episode_logs]))
     success_rate = float(np.mean([e["reached"] for e in episode_logs]))
@@ -25,6 +26,12 @@ def aggregate(episode_logs):
         total_truly_unsafe / total_rejected if total_rejected > 0 else None
     )
 
+    total_repair_attempts = sum(e.get("repair_attempts", 0) for e in episode_logs)
+    total_repair_successes = sum(e.get("repair_successes", 0) for e in episode_logs)
+    recovery_rate = (
+        total_repair_successes / total_repair_attempts if total_repair_attempts > 0 else None
+    )
+
     return {
         "n_episodes": len(episode_logs),
         "violation_rate": violation_rate,
@@ -32,6 +39,7 @@ def aggregate(episode_logs):
         "shield_activation_rate": activation_rate,
         "latency_ms_median": latency_ms_median,
         "intervention_precision": intervention_precision,
+        "recovery_rate": recovery_rate,
     }
 
 

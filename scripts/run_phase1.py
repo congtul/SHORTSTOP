@@ -16,7 +16,6 @@ conservatism cost). Recovery rate is not computable yet -- it measures the
 value of repair over plain reject, and there is no repair loop until Phase 4.
 """
 import sys
-import time
 from pathlib import Path
 
 import matplotlib
@@ -26,103 +25,31 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from shortstop.env import Obstacle, ReachAvoid2D
+from shortstop.experiment import run_episode as _run_episode
 from shortstop.metrics import aggregate, conservatism_cost
-from shortstop.policy import GaussianChunkPolicy
 from shortstop.reach import nominal_rollout, propagate_tube
 from shortstop.shield import ReachOnlyShield
 
 
-def make_scenario(rng):
-    start = np.array([-4.0, 0.0])
-    goal = np.array([4.0, 0.0])
-    obstacles = [
-        Obstacle(center=rng.uniform([-2.0, -1.5], [2.0, 1.5]), radius=rng.uniform(0.4, 0.8))
-        for _ in range(3)
-    ]
-    return start, goal, obstacles
-
-
-def nominal_violates(state, chunk, dt, obstacles):
-    """Privileged check: would this (rejected) chunk actually have hit an obstacle?
-
-    Uses the noise-free nominal rollout as ground truth -- "privileged" here
-    means we get to look at the outcome directly instead of only the shield's
-    conservative reachtube bound.
-    """
-    path = nominal_rollout(state, chunk, dt)
-    return any(o.contains(p) for p in path[1:] for o in obstacles)
+def _stage1_shield(goal, obstacles, dt, w_bar):
+    return ReachOnlyShield(goal=goal, obstacles=obstacles, dt=dt, w_bar=w_bar)
 
 
 def run_episode(shielded, rng, horizon=8, n_candidates=8, dt=0.1, w_bar=0.02, record_decisions=False):
-    start, goal, obstacles = make_scenario(rng)
-    env = ReachAvoid2D(start=start, goal=goal, obstacles=obstacles, dt=dt, w_bar=w_bar, rng=rng)
-    policy = GaussianChunkPolicy(goal=goal, horizon=horizon, n_candidates=n_candidates, rng=rng)
-    shield = ReachOnlyShield(goal=goal, obstacles=obstacles, dt=dt, w_bar=w_bar)
-
-    state = env.reset()
-    trajectory = [state.copy()]
-    activations = 0
-    violated = False
-    reached = False
-    latencies_ms = []
-    rejected_total = 0
-    rejected_truly_unsafe = 0
-    decisions = [] if record_decisions else None
-
-    for _ in range(env.max_steps):
-        candidates = policy.propose(state)
-        if shielded:
-            t0 = time.perf_counter()
-            action_chunk, info = shield.select(state, candidates)
-            latencies_ms.append((time.perf_counter() - t0) * 1000.0)
-
-            if info["fallback"] or info["n_admissible"] < len(candidates):
-                activations += 1
-
-            for chunk, ok in zip(candidates, info["admissible_mask"]):
-                if not ok:
-                    rejected_total += 1
-                    if nominal_violates(state, chunk, dt, obstacles):
-                        rejected_truly_unsafe += 1
-
-            if record_decisions:
-                chosen_idx = next((i for i, c in enumerate(candidates) if c is action_chunk), None)
-                decisions.append({
-                    "state": state.copy(),
-                    "candidates": candidates,
-                    "mask": info["admissible_mask"],
-                    "chosen_idx": chosen_idx,
-                    "fallback": info["fallback"],
-                })
-
-            first_action = action_chunk[0]
-        else:
-            first_action = candidates[0][0]
-
-        state, done, step_info = env.step(first_action)
-        trajectory.append(state.copy())
-        violated = violated or step_info["violated"]
-        reached = reached or step_info["reached"]
-        if done:
-            break
-
-    return {
-        "violated": violated,
-        "reached": reached,
-        "shield_activations": activations,
-        "steps": len(trajectory) - 1,
-        "latencies_ms": latencies_ms,
-        "rejected_total": rejected_total,
-        "rejected_truly_unsafe": rejected_truly_unsafe,
-        "trajectory": np.array(trajectory),
-        "start": start,
-        "goal": goal,
-        "obstacles": obstacles,
-        "decisions": decisions,
-        "dt": dt,
-        "w_bar": w_bar,
-    }
+    """Thin Stage-1-specific wrapper around shortstop.experiment.run_episode:
+    keeps this script's original `shielded: bool` signature so the plotting
+    helpers below don't need to change.
+    """
+    shield_factory = _stage1_shield if shielded else None
+    return _run_episode(
+        shield_factory,
+        rng,
+        horizon=horizon,
+        n_candidates=n_candidates,
+        dt=dt,
+        w_bar=w_bar,
+        record_decisions=record_decisions,
+    )
 
 
 def find_example(reached_target, seed_start=0, max_tries=300):
