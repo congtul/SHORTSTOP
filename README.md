@@ -61,16 +61,18 @@ SHORTSTOP/
 │   ├── shield.py                 # ReachOnlyShield / STLShield / CEShield / RepairShield (Stage 1-4)
 │   ├── experiment.py             # run_episode() dùng chung cho mọi stage (cùng seed để so sánh công bằng)
 │   ├── calibration.py            # calibrate_w_bar(): Table VII's high-quantile calibration recipe
+│   ├── baselines.py               # Stage 5: Conf-Thresh / MPC-Filter / CBF-Shield / STL-Monitor (Table II)
 │   └── metrics.py                # 7 metric + latency mean/p95: violation/success/activation/latency/precision/recovery/cons.cost
 ├── scripts/
 │   ├── run_phase1.py             # Thực nghiệm Stage 1 riêng (tên file giữ từ "Phase 1" cũ) + vẽ hình
-│   ├── run_ablation.py           # Bảng so sánh Unshielded + Stage 1-4 cùng lúc (config = dict STAGES)
+│   ├── run_ablation.py           # Bảng so sánh Unshielded + 4 baseline + Stage 1-4 (config = dict STAGES)
 │   └── run_horizon_sweep.py      # Quét certified horizon H (conservatism-horizon trade-off, Fig. 4)
 ├── tests/                        # pytest cho từng module
 │   ├── test_env.py
 │   ├── test_reach.py
 │   ├── test_stl.py
 │   ├── test_shield.py
+│   ├── test_baselines.py
 │   ├── test_calibration.py
 │   └── test_metrics.py
 ├── results/                      # Output khi chạy script (gitignore, tự sinh)
@@ -122,6 +124,43 @@ nghiệm dạng đóng (closed-form), không cần adversarial search thật s�
 sửa được chunk thay vì chỉ loại bỏ nó. Xem docstring của từng class trong
 `shortstop/shield.py` để biết chi tiết.
 
+### 2.1 Stage 5 — Baselines (Table II)
+
+`shortstop/baselines.py` implement 4 baseline trong Table II của paper (thứ
+5, Unshielded, đã có sẵn qua `shield_factory=None`). Khác 2 kiểu:
+
+| Class | Cơ chế | Cách chọn/sửa candidate |
+|---|---|---|
+| `ConfThreshShield` | Reject nếu "ensemble disagreement" (proxy độ tự tin) vượt threshold — không dùng obstacle/reachtube gì cả | Chọn giữa K candidate, giống Stage 1-3 |
+| `STLMonitorShield` | STL robustness trên **quỹ đạo nominal** (không reachtube, không counterexample search), reject nếu âm | Chọn giữa K candidate |
+| `MPCFilterShield` | QP sửa tối thiểu **action đầu tiên** để né vật cản (tuyến tính hoá bằng tangent plane) | Chỉ sửa `candidates[0]`, không chọn giữa K |
+| `CBFShield` | QP theo control barrier function, ràng buộc đạo hàm $\nabla h\cdot a + \alpha h \ge 0$ | Chỉ sửa `candidates[0]`, không chọn giữa K |
+
+Chọn baseline nào chạy: xoá/thêm dòng tương ứng trong dict `STAGES` ở
+`scripts/run_ablation.py` (giống cách chọn Stage 1-4). Tham số tune được ở
+đầu file: `CONF_THRESH_DISAGREEMENT_THRESHOLD`, `MPC_MAX_ACTION_NORM`,
+`CBF_ALPHA`.
+
+**2 hạn chế đã phát hiện khi kiểm chứng bằng số liệu thật (nên đọc trước khi
+trích số của baseline này vào paper)**:
+
+- `MPCFilterShield` ban đầu sửa **đúng ngay biên** vật cản (không chừa margin
+  cho nhiễu `w_bar`) — khiến gần 50% lần sửa vẫn bị nhiễu đẩy ngược vào
+  trong, hầu như không giảm violation rate so với Unshielded. Đã sửa: cộng
+  thêm margin `w_bar` vào ràng buộc QP (giống cách các shield khác inflate
+  box bằng `w_bar`), sau đó violation rate giảm thật (~0.81 → ~0.36 trên
+  mẫu 150 episode).
+- `ConfThreshShield`: đã thử sweep threshold từ 0.5 xuống 0.06 (ép activation
+  gần 100%) nhưng violation rate **không đổi** ở bất kỳ threshold nào
+  (~0.81, y hệt Unshielded). Lý do: `GaussianChunkPolicy` sinh nhiễu quanh
+  một hướng tham chiếu cố định, không biết vật cản ở đâu — nên "candidate
+  lệch khỏi centroid của K candidate" không mang thông tin gì về việc có an
+  toàn hay không. Đây là hạn chế **cấu trúc** của proxy "ensemble
+  disagreement" khi không có ensemble thật (paper dùng disagreement giữa
+  nhiều model đã train, có thể bắt được tín hiệu out-of-distribution thật —
+  bản giả lập ở đây thì không), chứ không phải do chọn sai threshold. Xem
+  docstring `ConfThreshShield` để biết chi tiết.
+
 ## 3. Setup (Stage 0)
 
 Yêu cầu: Python 3.10+ (đã test với 3.14.7). Thuần Python, không phụ thuộc
@@ -156,7 +195,7 @@ shield reject/fallback logic):
 pytest tests/ -v
 ```
 
-Kỳ vọng: 19/19 test pass.
+Kỳ vọng: 26/26 test pass.
 
 **Chạy thực nghiệm Stage 1 riêng** (có vẽ hình trajectory + decision snapshot):
 
@@ -170,15 +209,16 @@ Script sẽ:
   rate).
 - Lưu hình trajectory mẫu + decision snapshot vào `results/phase1_*.png`.
 
-**Chạy bảng so sánh Stage 1--4 (ablation, để so kết quả qua các stage)**:
+**Chạy bảng so sánh Unshielded + 4 baseline + Stage 1--4 (ablation, để so kết quả qua các stage)**:
 
 ```bash
 python scripts/run_ablation.py
 ```
 
-Script chạy `Unshielded` + `Stage 1` (`ReachOnlyShield`) + `Stage 2`
-(`STLShield`) + `Stage 3` (`CEShield`) + `Stage 4` (`RepairShield`) trên
-**cùng một bộ seed** (nhờ `shortstop/experiment.py` dùng chung), in bảng
+Script chạy `Unshielded` + 4 baseline (`ConfThreshShield`, `MPCFilterShield`,
+`CBFShield`, `STLMonitorShield` — mục 2.1) + `Stage 1` (`ReachOnlyShield`) +
+`Stage 2` (`STLShield`) + `Stage 3` (`CEShield`) + `Stage 4` (`RepairShield`)
+trên **cùng một bộ seed** (nhờ `shortstop/experiment.py` dùng chung), in bảng
 (violation/success/activation/lat_median/lat_mean/lat_p95/precision/recovery/cons.cost —
 3 cột latency vì median một mình có thể che mất đuôi phân phối đắt, xem giải
 thích ở docstring `RepairShield` trong `shortstop/shield.py`) và lưu bản
@@ -231,8 +271,9 @@ thay cho Phase 0--6 cũ):
       vai trò của adversarial search) trên box 2D (Gaussian) — `CEShield`.
 - [x] **Stage 4** — Repair: gradient step + trust region, certify lại, có
       recovery-rate metric (Gaussian) — `RepairShield`.
-- [ ] **Stage 5** — Baselines: MPC-Filter, CBF-Shield, STL-Monitor,
-      Conf-Thresh (vẫn trên Gaussian).
+- [x] **Stage 5** — Baselines: Conf-Thresh, MPC-Filter, CBF-Shield,
+      STL-Monitor (vẫn trên Gaussian) — `shortstop/baselines.py`, xem mục
+      2.1 bên dưới về hạn chế của từng baseline trong prototype này.
 - [ ] **Stage 6a** — 2D policy thật: train một diffusion/flow policy nhỏ
       trên `Reach-Avoid-2D`, hoặc import policy có sẵn (thay Gaussian).
 - [ ] **Stage 6b** — Metrics + stress test: 7 metric, horizon sweep,

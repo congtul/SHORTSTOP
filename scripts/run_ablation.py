@@ -51,6 +51,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from shortstop.baselines import CBFShield, ConfThreshShield, MPCFilterShield, STLMonitorShield
 from shortstop.calibration import calibrate_w_bar
 from shortstop.env import ReachAvoid2D
 from shortstop.experiment import make_scenario, run_episode
@@ -91,8 +92,36 @@ CALIBRATION_EPISODES = 200
 CALIBRATION_QUANTILE = 0.99
 CALIBRATION_SAFETY_FACTOR = 1.25
 
+# Table II's five comparison baselines (shortstop/baselines.py). Each is its
+# own dict entry below like the Stage 1-4 rows -- comment one out to drop it
+# from the table, or tune its knob here without touching baselines.py.
+CONF_THRESH_DISAGREEMENT_THRESHOLD = 0.15  # reject if a candidate's endpoint
+                                            # is this far from the K-candidate centroid.
+                                            # See ConfThreshShield's docstring: this proxy is
+                                            # measured to be *uncorrelated* with real danger on
+                                            # this scenario at any threshold (0.5 down to 0.06
+                                            # all gave ~0.81 violation, same as Unshielded) --
+                                            # tuning this only changes activation rate, not safety.
+MPC_MAX_ACTION_NORM = 1.0                  # QP action bound, matches env's own clip
+CBF_ALPHA = 1.0                            # class-K gain in the barrier condition
+
 STAGES = {
     "unshielded": None,
+    # --- Table II baselines: comment out any of these 4 lines to drop it ---
+    "conf_thresh": lambda goal, obstacles, dt, w_bar: ConfThreshShield(
+        goal=goal, obstacles=obstacles, dt=dt, w_bar=w_bar,
+        disagreement_threshold=CONF_THRESH_DISAGREEMENT_THRESHOLD,
+    ),
+    "mpc_filter": lambda goal, obstacles, dt, w_bar: MPCFilterShield(
+        goal=goal, obstacles=obstacles, dt=dt, w_bar=w_bar, max_action_norm=MPC_MAX_ACTION_NORM,
+    ),
+    "cbf_shield": lambda goal, obstacles, dt, w_bar: CBFShield(
+        goal=goal, obstacles=obstacles, dt=dt, w_bar=w_bar, alpha=CBF_ALPHA,
+    ),
+    "stl_monitor": lambda goal, obstacles, dt, w_bar: STLMonitorShield(
+        goal=goal, obstacles=obstacles, dt=dt, w_bar=w_bar,
+    ),
+    # --- ShortStop's own Stage 1-4 ablation ---
     "stage1_reach_only": lambda goal, obstacles, dt, w_bar: ReachOnlyShield(
         goal=goal, obstacles=obstacles, dt=dt, w_bar=w_bar
     ),
