@@ -1,0 +1,51 @@
+{
+  "unshielded": {
+    "n_episodes": 500,
+    "violation_rate": 0.784,
+    "success_rate": 0.216,
+    "shield_activation_rate": 0.0,
+    "latency_ms_median": null,
+    "intervention_precision": null,
+    "recovery_rate": null
+  },
+  "stage1_reach_only": {
+    "n_episodes": 500,
+    "violation_rate": 0.002,
+    "success_rate": 0.23,
+    "shield_activation_rate": 0.7543771296443803,
+    "latency_ms_median": 0.7672000210732222,
+    "intervention_precision": 0.22215210290382117,
+    "recovery_rate": null,
+    "conservatism_cost": 0.17592592592592593
+  },
+  "stage2_stl_to_go": {
+    "n_episodes": 500,
+    "violation_rate": 0.004,
+    "success_rate": 0.204,
+    "shield_activation_rate": 0.7817080973247108,
+    "latency_ms_median": 1.0393000266049057,
+    "intervention_precision": 0.12012628282472242,
+    "recovery_rate": null,
+    "conservatism_cost": 0.2407407407407407
+  },
+  "stage3_ce_search": {
+    "n_episodes": 500,
+    "violation_rate": 0.004,
+    "success_rate": 0.204,
+    "shield_activation_rate": 0.7817080973247108,
+    "latency_ms_median": 1.6889999969862401,
+    "intervention_precision": 0.12012628282472242,
+    "recovery_rate": null,
+    "conservatism_cost": 0.2407407407407407
+  },
+  "stage4_repair": {
+    "n_episodes": 500,
+    "violation_rate": 0.002,
+    "success_rate": 0.384,
+    "shield_activation_rate": 0.6027142794158922,
+    "latency_ms_median": 3.421699977479875,
+    "intervention_precision": 0.7163923067090933,
+    "recovery_rate": 0.1459227467811159,
+    "conservatism_cost": 0.13888888888888884
+  }
+}

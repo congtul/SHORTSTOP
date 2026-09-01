@@ -1,0 +1,46 @@
+{
+  "stage1_reach_only": [
+    {
+      "horizon": 4,
+      "n_episodes": 10,
+      "violation_rate": 0.0,
+      "success_rate": 0.2,
+      "shield_activation_rate": 0.6641265822784811,
+      "latency_ms_median": 0.3352499916218221,
+      "intervention_precision": 0.8724435397886983,
+      "recovery_rate": null
+    },
+    {
+      "horizon": 8,
+      "n_episodes": 10,
+      "violation_rate": 0.0,
+      "success_rate": 0.3,
+      "shield_activation_rate": 0.7015899488681929,
+      "latency_ms_median": 0.7946999976411462,
+      "intervention_precision": 0.5176609105180534,
+      "recovery_rate": null
+    }
+  ],
+  "stage4_repair": [
+    {
+      "horizon": 4,
+      "n_episodes": 10,
+      "violation_rate": 0.0,
+      "success_rate": 0.2,
+      "shield_activation_rate": 0.6719240506329114,
+      "latency_ms_median": 1.7796499887481332,
+      "intervention_precision": 0.7311921296296297,
+      "recovery_rate": 0.044128646222887064
+    },
+    {
+      "horizon": 8,
+      "n_episodes": 10,
+      "violation_rate": 0.0,
+      "success_rate": 0.1,
+      "shield_activation_rate": 0.7959337349397592,
+      "latency_ms_median": 3.31429997459054,
+      "intervention_precision": 0.4200016169455898,
+      "recovery_rate": 0.05091137649277184
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+import numpy as np
+
+
+def aggregate(episode_logs):
+    """Aggregate per-episode logs into the paper's headline metrics.
+
+    Each log needs 'violated', 'reached', 'shield_activations', 'steps'.
+    Optional (present only for shielded runs): 'latencies_ms',
+    'rejected_total', 'rejected_truly_unsafe', 'repair_attempts',
+    'repair_successes' -- see shortstop/experiment.py.
+
+    Recovery rate (7th metric) is only meaningful once a repair mechanism
+    exists (Stage 4, shortstop.shield.RepairShield): it compares plain
+    reject vs. repair, so it's None for any stage without repair data.
+    """
+    violation_rate = float(np.mean([e["violated"] for e in episode_logs]))
+    success_rate = float(np.mean([e["reached"] for e in episode_logs]))
+    activation_rate = float(np.mean([e["shield_activations"] / e["steps"] for e in episode_logs]))
+
+    all_latencies = [t for e in episode_logs for t in e.get("latencies_ms", [])]
+    latency_ms_median = float(np.median(all_latencies)) if all_latencies else None
+    # Median alone can hide a heavy tail (e.g. a repair path that only
+    # kicks in on <50% of steps but costs much more when it does) --
+    # mean and p95 catch that shape shift; see shortstop/shield.py's
+    # RepairShield discussion of activation-rate-driven latency artifacts.
+    latency_ms_mean = float(np.mean(all_latencies)) if all_latencies else None
+    latency_ms_p95 = float(np.percentile(all_latencies, 95)) if all_latencies else None
+
+    total_rejected = sum(e.get("rejected_total", 0) for e in episode_logs)
+    total_truly_unsafe = sum(e.get("rejected_truly_unsafe", 0) for e in episode_logs)
+    intervention_precision = (
+        total_truly_unsafe / total_rejected if total_rejected > 0 else None
+    )
+
+    total_repair_attempts = sum(e.get("repair_attempts", 0) for e in episode_logs)
+    total_repair_successes = sum(e.get("repair_successes", 0) for e in episode_logs)
+    recovery_rate = (
+        total_repair_successes / total_repair_attempts if total_repair_attempts > 0 else None
+    )
+
+    return {
+        "n_episodes": len(episode_logs),
+        "violation_rate": violation_rate,
+        "success_rate": success_rate,
+        "shield_activation_rate": activation_rate,
+        "latency_ms_median": latency_ms_median,
+        "latency_ms_mean": latency_ms_mean,
+        "latency_ms_p95": latency_ms_p95,
+        "intervention_precision": intervention_precision,
+        "recovery_rate": recovery_rate,
+    }
+
+
+def conservatism_cost(unshielded_logs, shielded_logs):
+    """Success-rate drop the shield causes on episodes with no real unsafe event.
+
+    "Real unsafe event" is read off the paired Unshielded run (same seed, so
+    same scenario/noise): an episode is "benign" if the Unshielded rollout
+    never violated. Requires unshielded_logs[i] and shielded_logs[i] to come
+    from the same seed for every i.
+    """
+    benign_idx = [i for i, e in enumerate(unshielded_logs) if not e["violated"]]
+    if not benign_idx:
+        return None
+    unshielded_success = np.mean([unshielded_logs[i]["reached"] for i in benign_idx])
+    shielded_success = np.mean([shielded_logs[i]["reached"] for i in benign_idx])
+    return float(unshielded_success - shielded_success)

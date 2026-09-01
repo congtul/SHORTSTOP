@@ -1,0 +1,480 @@
+% !TEX program = pdflatex
+\documentclass[aspectratio=169]{beamer}
+\usetheme{metropolis}
+
+\usepackage[T5]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{vntex}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{xcolor}
+
+\newcommand{\st}{\textsc{ShortStop}}
+\newcommand{\good}[1]{\textcolor{green!40!black}{#1}}
+\newcommand{\bad}[1]{\textcolor{red!60!black}{#1}}
+\newcommand{\wip}[1]{\textcolor{orange!80!black}{#1}}
+
+\title{ShortStop --- Report 2}
+\subtitle{Tìm hiểu kĩ về khung P-R-C-S và Kết quả Thực nghiệm trên Reach-Avoid-2D}
+\author{Tamira Le}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{frame}[t,shrink=8]{Overview}
+\begin{itemize}
+    \item \textbf{Phần I --- Lý thuyết sâu: khung P-R-C-S.} Từng chữ cái (Propose, Reach, Certify, Select/Repair) được tách thành một mục riêng: trích dẫn paper gốc, công thức paper dùng, và mapping trực tiếp với code trong \texttt{shortstop/}.
+    \item \textbf{Phần II --- Baseline methods (in progress).} Sáu hệ thống so sánh trong Table II của paper, cơ chế + trạng thái tái lập hiện tại.
+    \item \textbf{Phần III --- Implementation: kết quả thực nghiệm.} 2 bảng chính (thêm từng stage; so baseline) từ \texttt{results/ablation.json} và \texttt{results/baselines.json}, cộng Table~2b chạy lại với policy diffusion thật đã train (\texttt{results/ablation\_diffusion.json}), cộng 1 bảng optional từ \texttt{results/stage34\_iters\_comparison.json} cho thấy đang tuning.
+    \item Table 1--3 chạy trên \texttt{Reach-Avoid-2D} với policy Gaussian giả lập (Track B, xem Report 1); Table 2b chạy lại đúng setup đó nhưng với một diffusion policy nhỏ đã train thật (Stage 6a) --- vẫn \emph{chưa} phải 3 benchmark thật (LIBERO/ManiSkill2/RLBench, Stage 7a--7c).
+\end{itemize}
+\end{frame}
+
+%=====================================================================
+\section{Track A \& Track B --- Kế hoạch song song (cập nhật)}
+%=====================================================================
+
+\begin{frame}[t,shrink=8]{Track A \& Track B: lộ trình song song --- cập nhật (1/3)}
+\footnotesize
+\begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|}
+\hline
+\textbf{Track A} & \textbf{Status} & \textbf{Track B} & \textbf{Status} \\
+\hline
+\textbf{Stage 0} --- Reachability cơ bản (interval/zonotope, Minkowski sum, Lipschitz) + Shielding/Safe RL context; Report 2 Mục 2, [44],[45]. &
+\good{Đã xong} &
+Setup --- env \texttt{Reach-Avoid-2D}, interval arithmetic, \texttt{cvxpy}; policy Gaussian giả lập chỉ để dựng khung. &
+\good{Đã xong} \\
+\hline
+\textbf{Stage 1} --- Reachtube \& Assumption 1 (sound over-approximation); Report 2 Mục 2, Eq.~1. &
+\good{Đã xong} &
+Reach-only shield --- reachtube, binary reject (Gaussian; violation 78.4\%$\to$0.2\%, success 21.6\%$\to$23.0\%; Table 1). &
+\good{Đã xong} \\
+\hline
+\textbf{Stage 2} --- STL syntax \& robustness-to-go, Assumption 2; Report 2 Mục 3, Eq.~2; còn thiếu $\Diamond/\mathcal U$. &
+\good{Đã xong} &
+STL-to-go --- thay reject nhị phân bằng robustness lower bound (Gaussian; violation 0.4\%, prec.~12.0\%; Table 1). &
+\good{Đã xong} \\
+\hline
+\textbf{Stage 3} --- CEGIS: tìm counterexample (adversarial search); Report 2 Mục 4, Eq.~3, [10]--[15]. &
+\good{Đã xong} &
+CE search --- box-vs-circle closed form trên 2D (Gaussian; violation 0.4\%, cùng số Stage 2; Table 1 \& 3). &
+\good{Đã xong} \\
+\hline
+\end{tabularx}
+\end{frame}
+
+\begin{frame}[t,shrink=8]{Track A \& Track B: lộ trình song song --- cập nhật (2/3)}
+\footnotesize
+\begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|}
+\hline
+\textbf{Track A} & \textbf{Status} & \textbf{Track B} & \textbf{Status} \\
+\hline
+\textbf{Stage 4} --- CEGIS: sửa theo counterexample (trust-region projection); Report 2 Mục 4, Eq.~4--5.$^\dagger$ &
+\good{Đã xong} &
+Repair --- Algorithm~1 đầy đủ (Gaussian; violation 0.2\%, success 38.4\%, precision 71.6\%; Table 1). &
+\good{Đã xong} \\
+\hline
+\textbf{Stage 5} --- MPC/CBF \& fallback, Assumption 3 (safe fallback tồn tại).$^\ddagger$ &
+\wip{Đang tìm hiểu} &
+Baselines --- MPC-Filter, CBF-Shield, STL-Monitor, Conf-Thresh (Gaussian; 4/4 đã chạy; Table 2). &
+\good{Đã xong} \\
+\hline
+\textbf{Stage 6a} --- Generative policy, bản nhỏ (Diffusion Policy/flow matching). &
+\good{Đã xong} &
+2D policy thật --- scripted expert đa mode $\to$ dataset (500 demo) $\to$ \texttt{ConditionalUnet1D} (108K tham số) train 5000 step $\to$ thế \texttt{GaussianChunkPolicy} (Table~2b). &
+\good{Đã xong} \\
+\hline
+\textbf{Stage 6b} --- Safety guarantee (bounded-time $\to$ all-time, Grönwall trade-off); Report 2 mới nhắc lại, chưa tự chứng minh. &
+Chưa bắt đầu &
+Metrics + stress test --- Table~1/2 đã \good{chạy lại với policy 2D thật} (Table~2b); horizon sweep + bootstrap với policy thật thì \wip{chưa}. &
+\wip{Một phần} \\
+\hline
+\end{tabularx}
+\vspace{4pt}
+{\scriptsize $^\dagger$ Vòng lặp \texttt{max\_repair\_iters}$>$1 không có convergence guarantee --- an toàn chỉ giữ vững nhờ re-certify, chưa viết thành proposition riêng. $^\ddagger$ Đang đọc Wabersich \& Zeilinger~[33], Ames et al.~[37],[38], Cheng et al.~[39] (\texttt{READING\_LIST.md} mục A); chưa đào sâu bằng khuôn trích dẫn+công thức+code như Mục 1--4.}
+\end{frame}
+
+\begin{frame}[t,shrink=8]{Track A \& Track B: lộ trình song song --- cập nhật (3/3)}
+\footnotesize
+\begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|>{\raggedright\arraybackslash}p{0.34\textwidth}|>{\centering\arraybackslash}p{0.09\textwidth}|}
+\hline
+\textbf{Track A} & \textbf{Status} & \textbf{Track B} & \textbf{Status} \\
+\hline
+\textbf{Stage 7a} --- Generative policy, scale lên (cùng nhóm với 6a). &
+Chưa bắt đầu &
+\textbf{LIBERO} --- swap sang env thật, long-horizon manipulation. &
+Chưa bắt đầu (tuỳ resource GPU) \\
+\hline
+\textbf{Stage 7b} --- Generative policy, scale lên (cùng nhóm với 6a). &
+Chưa bắt đầu &
+\textbf{ManiSkill2} --- swap sang env thật, contact-rich precision. &
+Chưa bắt đầu (tuỳ resource GPU) \\
+\hline
+\textbf{Stage 7c} --- Generative policy, scale lên (cùng nhóm với 6a). &
+Chưa bắt đầu &
+\textbf{RLBench} --- swap sang env thật, diverse manipulation tasks. &
+Chưa bắt đầu (tuỳ resource GPU) \\
+\hline
+\end{tabularx}
+\vspace{4pt}
+\footnotesize\textit{So với Report 1: Stage 1--4 (cả Track A và Track B), code của 4 baseline (Track B, Stage 5), và giờ cả Stage 6a (cả Track A và Track B) đã chuyển từ ``chưa bắt đầu'' sang \good{đã xong}. Lý thuyết gốc của baseline (Track A, Stage 5) và phần metric/stress-test mở rộng của Stage 6b (Track B) là 2 mảnh còn lại gần nhất, đang \wip{tìm hiểu}/\wip{một phần}; Stage 7a trở đi vẫn y nguyên so với Report 1.}
+\end{frame}
+
+%=====================================================================
+\section{Phần I --- Baseline methods}
+%=====================================================================
+
+\begin{frame}[t,shrink=8]{Sáu hệ thống so sánh (paper Table II) --- trạng thái tái lập}
+\footnotesize
+\begin{center}
+\begin{tabular}{@{}l l l l@{}}
+\toprule
+\textbf{Hệ thống} & \textbf{Cơ chế} & \textbf{Nguồn} & \textbf{Trạng thái} \\
+\midrule
+\texttt{Unshielded} & policy nguyên bản, không lọc & --- & \good{Đã chạy} (Reach-Avoid-2D) \\
+\texttt{Conf-Thresh} & reject theo ensemble disagreement & paper Sec.~VI-D & \wip{Đã chạy, nhưng proxy yếu}$^\dagger$ \\
+\texttt{MPC-Filter} & QP sửa toàn horizon, tuyến tính hoá & Wabersich \& Zeilinger~[33] & \good{Đã chạy} \\
+\texttt{CBF-Shield} & barrier QP $h(x)=\lVert x-c\rVert^2-r^2$ & Ames et al.~[38], Cheng et al.~[39] & \good{Đã chạy} \\
+\texttt{STL-Monitor} & STL trên nominal rollout, không tube & Deshmukh et al.~[53] & \good{Đã chạy} \\
+\textbf{\st{} (Stage 1--4)} & Reach + STL + CE search + Repair & phương pháp của paper & \good{Đã chạy đầy đủ} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{6pt}
+{\scriptsize $^\dagger$ \texttt{ConfThreshShield} dùng spread quanh centroid của $K$ endpoint làm proxy ``ensemble disagreement'' vì \texttt{GaussianChunkPolicy} không phải ensemble thật --- đo được là proxy này \emph{không mang tín hiệu} về nguy hiểm trên scenario hiện tại (violation phẳng $\approx$81\% ở mọi threshold), khác paper (real diffusion ensemble: 11.2\% violation, tín hiệu yếu nhưng có thật). Xem docstring \texttt{shortstop/baselines.py:ConfThreshShield}.}
+
+\vspace{6pt}
+\begin{alertblock}{Trạng thái tổng thể: \wip{IN PROGRESS}}
+Cả 6 hệ thống đã chạy trên \texttt{Reach-Avoid-2D}, cùng $\hat f$/$\varepsilon$/fallback để so sánh công bằng (đúng nguyên tắc paper) --- ban đầu với policy Gaussian giả lập, và giờ \good{đã chạy lại thêm} với một diffusion policy nhỏ đã train thật (Stage~6a, xem Table~2b, Phần~II). \emph{Chưa} chạy trên LIBERO/ManiSkill2/RLBench --- khớp Stage 7a--7c (Track B, Report 1) vẫn ``chưa bắt đầu.''
+\end{alertblock}
+\end{frame}
+
+%=====================================================================
+\section{Phần II --- Implementation: kết quả thực nghiệm}
+%=====================================================================
+
+\begin{frame}[t,shrink=8]{Thiết lập chung cho 4 bảng dưới đây}
+\begin{itemize}
+    \item \textbf{Env}: \texttt{Reach-Avoid-2D}, start/goal cố định, 3 obstacle tròn vị trí/bán kính ngẫu nhiên mỗi episode (\texttt{shortstop/experiment.py:make\_scenario}).
+    \item \textbf{Policy}: \texttt{GaussianChunkPolicy}, $K=8$, $H=8$ (stand-in cho $\pi_\theta$ thật) cho Table~1--3; Table~2b thay bằng \texttt{DiffusionChunkPolicy} (Stage~6a, đã train) --- cùng $K=8$, $H=8$, chỉ đổi nguồn candidate.
+    \item \textbf{Calibration}: $\bar w$ certify = quantile 99\% $\times$ 1.25 trên 200 episode held-out (\texttt{shortstop/calibration.py}), không phải ground-truth $\bar w=0.02$ cho không.
+    \item \textbf{Table 1, 2 \& 2b}: 500 episodes/hàng, cùng seed offset --- so sánh trực tiếp được với nhau (kể cả giữa 2 và 2b, vì chỉ policy đổi).
+    \item \textbf{Table 3 (optional)}: 300 episodes/hàng, chạy riêng để quét \texttt{max\_repair\_iters} --- \emph{không} so số tuyệt đối với Table 1/2, chỉ so nội bộ 3 hàng với nhau.
+\end{itemize}
+\end{frame}
+
+%---------------------------------------------------------------------
+\begin{frame}[t,shrink=8]{Table 1 --- Thêm từng stage vào (\texttt{results/ablation.json})}
+\scriptsize
+\begin{center}
+\begin{tabular}{@{}l r r r r r r r@{}}
+\toprule
+\textbf{Stage} & \textbf{Viol.\%$\downarrow$} & \textbf{Succ.\%$\uparrow$} & \textbf{Act.\%} & \textbf{Lat.(ms)} & \textbf{Prec.$\uparrow$} & \textbf{Recov.$\uparrow$} & \textbf{Cons.\%$\downarrow$} \\
+\midrule
+Unshielded & 78.4 & 21.6 & 0.0 & n/a & n/a & n/a & n/a \\
++ Reach-only (St.1) & 0.2 & 23.0 & 75.4 & 0.77 & 22.2 & n/a & 17.6 \\
++ STL-to-go (St.2) & 0.4 & 20.4 & 78.2 & 1.04 & 12.0 & n/a & 24.1 \\
++ CE search (St.3) & 0.4 & 20.4 & 78.2 & 1.69 & 12.0 & n/a & 24.1 \\
++ Repair (St.4, \st{}) & \textbf{0.2} & \textbf{38.4} & 60.3 & 3.42 & \textbf{71.6} & 14.6 & \textbf{13.9} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{frame}
+
+%---------------------------------------------------------------------
+\begin{frame}[t,shrink=8]{Table 2 --- So với baseline (\texttt{results/baselines.json})}
+\scriptsize
+\begin{center}
+\begin{tabular}{@{}l r r r r r r r@{}}
+\toprule
+\textbf{Hệ thống} & \textbf{Viol.\%$\downarrow$} & \textbf{Succ.\%$\uparrow$} & \textbf{Act.\%} & \textbf{Lat.(ms)} & \textbf{Prec.$\uparrow$} & \textbf{Recov.$\uparrow$} & \textbf{Cons.\%$\downarrow$} \\
+\midrule
+Unshielded & 78.4 & 21.6 & 0.0 & n/a & n/a & n/a & n/a \\
+Conf-Thresh & 79.0 & 21.0 & 46.5 & 0.19 & 13.5 & n/a & 18.5 \\
+MPC-Filter~[33] & 2.2 & \textbf{90.2} & 94.6 & 17.94 & 31.2 & 91.0 & \textbf{0.0} \\
+CBF-Shield~[38,39] & 18.0 & 82.0 & 48.1 & 4.92 & 47.4 & 100.0 & \textbf{0.0} \\
+STL-Monitor~[53] & 12.4 & 41.6 & 55.9 & 0.87 & 100.0 & n/a & 5.6 \\
+\st{} (Stage 4) & \textbf{0.2} & 38.4 & 60.3 & 3.42 & 71.6 & 14.6 & 13.9 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{frame}
+
+%---------------------------------------------------------------------
+\begin{frame}[t,shrink=8]{Table 2b --- Table 2 chạy lại với Stage 6a: policy diffusion thật (\texttt{results/ablation\_diffusion.json})}
+\scriptsize
+\begin{center}
+\begin{tabular}{@{}l r r r@{}}
+\toprule
+\textbf{Hệ thống} & \textbf{Viol.\% (Gauss$\to$Diff)} & \textbf{Succ.\% (Gauss$\to$Diff)} & \textbf{Act.\% (Gauss$\to$Diff)} \\
+\midrule
+Unshielded & 78.4 $\to$ \textbf{67.0} & 21.6 $\to$ \textbf{32.0} & --- \\
+Conf-Thresh & 79.0 $\to$ 76.6 & 21.0 $\to$ 23.4 & 46.5 $\to$ \textbf{77.7} \\
+MPC-Filter~[33] & 2.2 $\to$ \textbf{0.4} & 90.2 $\to$ \textbf{94.8} & 94.6 $\to$ 39.3 \\
+CBF-Shield~[38,39] & 18.0 $\to$ \textbf{6.0} & 82.0 $\to$ \textbf{86.8} & 48.1 $\to$ 38.5 \\
+STL-Monitor~[53] & 12.4 $\to$ \bad{31.0} & 41.6 $\to$ 65.2 & 55.9 $\to$ 38.0 \\
+\st{} (Stage 4) & \textbf{0.2 $\to$ 0.0} & 38.4 $\to$ \textbf{88.8} & 60.3 $\to$ 35.6 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{6pt}
+\begin{itemize}
+    \item \textbf{Setup}: đúng pipeline Stage 6a --- \texttt{shortstop/expert.py} (scripted planner, đa mode upper/lower) $\to$ \texttt{shortstop/dataset.py} (500 demo, 36693 window) $\to$ \texttt{shortstop/diffusion\_policy.py} (\texttt{ConditionalUnet1D} 108K tham số, DDPM 100 train-step/10 DDIM infer-step) $\to$ \texttt{scripts/train\_diffusion\_policy.py} (5000 gradient step, 85.5s CPU) $\to$ \texttt{shortstop/policy.py:DiffusionChunkPolicy} thế chỗ \texttt{GaussianChunkPolicy} trong \texttt{run\_episode()} (tham số \texttt{policy\_factory} mới). Cùng 500 episode, cùng seed offset với Table~2.
+    \item \textbf{Khoảng cách \st{}~vs.~MPC-Filter thu hẹp mạnh}: success $38.4\%\to88.8\%$ (so MPC-Filter $90.2\%\to94.8\%$) --- từ cách nhau 52 điểm còn 6 điểm, và \st{} còn an toàn hơn (violation $0.0\%$ vs.\ $0.4\%$). Do candidate từ policy thật đều hướng đúng nên tỉ lệ được accept/repair thành công cao hơn hẳn so với candidate gần-random của Gaussian.
+    \item \textbf{Conf-Thresh lộ rõ điểm yếu hơn}: activation nhảy $46.5\%\to77.7\%$ (giờ có đa mode thật để ``disagree'') nhưng violation/success gần như không đổi --- ensemble thật xác nhận đúng nghi vấn ở ghi chú $^\dagger$ (Phần~I): reject theo disagreement không phân biệt được ``khác nhau'' (2 route upper/lower, mỗi route riêng vẫn an toàn) với ``nguy hiểm''.
+    \item \textbf{STL-Monitor tệ đi} ($12.4\%\to31.0\%$ violation) --- phát hiện mới: không cộng disturbance bound (chỉ check nominal rollout), nên khi policy thật đi sát obstacle hơn (thay vì đường ngẫu nhiên của Gaussian), noise dễ đẩy qua ranh giới mà STL-Monitor không bắt được.
+\end{itemize}
+\end{frame}
+
+%---------------------------------------------------------------------
+\begin{frame}[t,shrink=8]{Table 3 (optional) --- Đang tuning: quét \texttt{max\_repair\_iters} (\texttt{stage34\_iters\_comparison.json})}
+\scriptsize
+\begin{center}
+\begin{tabular}{@{}l r r r r r r r@{}}
+\toprule
+\textbf{Cấu hình (n=300)} & \textbf{Viol.\%} & \textbf{Succ.\%$\uparrow$} & \textbf{Act.\%} & \textbf{Lat.(ms)} & \textbf{Prec.} & \textbf{Recov.} & \textbf{Cons.\%} \\
+\midrule
+CE search (St.3, không repair) & 0.3 & 24.0 & 73.1 & 1.64 & 46.4 & n/a & 15.6 \\
+Repair, \texttt{iters=1} (mặc định) & 1.0 & 48.7 & 52.4 & 3.35 & 91.0 & 15.9 & 4.7 \\
+Repair, \texttt{iters=3} & 1.7 & \textbf{52.3} & 47.3 & 6.71 & \textbf{93.9} & \textbf{19.1} & 4.7 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{8pt}
+\begin{itemize}
+    \item \textbf{Ý nghĩa của bảng này}: \texttt{max\_repair\_iters=1} là Algorithm~1 gốc (một bước gradient, không retry); \texttt{iters=3} là mở rộng CEGIS-style (lặp tìm counterexample mới sau mỗi lần sửa thất bại) --- \emph{vượt ngoài} paper, đang được thử nghiệm.
+    \item Tăng \texttt{iters} 1$\to$3: success $48.7\%\to52.3\%$, precision $91.0\%\to93.9\%$, recovery $15.9\%\to19.1\%$ --- đổi lại latency tăng gần gấp đôi ($3.35\to6.71$ms) và violation nhích nhẹ ($1.0\%\to1.7\%$, vẫn rất thấp so mọi baseline ở Table~2).
+    \item \textbf{Đây chính là hướng thu hẹp khoảng cách với MPC-Filter} (Table~2: success 90.2\%) mà không cần đổi thuật toán --- gợi ý còn dư địa tuning (\texttt{step\_size}, \texttt{trust\_region}, \texttt{max\_repair\_iters}) trước khi cần một cơ chế repair mạnh hơn.
+    \item Lưu ý: bảng này chạy 300 episodes/seed riêng (không phải 500 như Table~1--2) --- chỉ dùng để so sánh nội bộ 3 hàng, không đối chiếu tuyệt đối với Table~1--2.
+\end{itemize}
+\end{frame}
+
+%=====================================================================
+\section{Phần III Chuẩn bị hạ tầng: Linux cho LIBERO/ManiSkill2/RLBench}
+%=====================================================================
+
+\begin{frame}[t,shrink=8]{Đã có policy pretrained cho 3 benchmark chưa?}
+\footnotesize
+\begin{center}
+\begin{tabular}{@{}l l p{0.42\textwidth}@{}}
+\toprule
+\textbf{Benchmark} & \textbf{Checkpoint public?} & \textbf{Nguồn / ghi chú} \\
+\midrule
+LIBERO & \good{Có} & $\pi_0$ (Physical Intelligence, flow-matching) fine-tune trên LIBERO-Spatial/Object/Goal/10; host qua repo \texttt{openpi} \\
+ManiSkill2/3 & \wip{Chỉ có code + demo data} & Official repo có script train BC/Diffusion Policy/ACT + 4M+ frame demo, chưa thấy checkpoint sẵn để tải; có hỗ trợ eval checkpoint ngoài (Octo, RT-X, RDT-1B) \\
+RLBench & \good{Có}, nhưng \bad{sai kiểu policy} & PerAct (18 task) và RVT/RVT-2 (20 task) có checkpoint chính thức --- nhưng cả hai là transformer dự đoán 1 keyframe action, \emph{không phải} generative chunk policy mà $\pi_\theta$ của \st{} giả định \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{6pt}
+\begin{itemize}
+    \item \textbf{LIBERO là ứng viên tốt nhất cho Stage 7a}: $\pi_0$ đúng kiểu flow-matching sinh action chunk --- khớp thẳng giả định $\pi_\theta$ của \st{}, không cần train lại từ đầu.
+    \item \textbf{ManiSkill2/3}: hướng khả thi nhất là tự train Diffusion Policy bằng script + demo data chính thức của ManiSkill, hoặc thử adapt Octo/RDT-1B nếu action space khớp.
+    \item \textbf{RLBench}: PerAct/RVT tốt để so sánh baseline ``học từ demo'', nhưng để đúng khung generative-policy của \st{}, cần policy khác (VD ``Mini Diffuser,'' arXiv:2505.09430 --- diffusion policy multitask cho RLBench-18) thay vì PerAct/RVT.
+\end{itemize}
+\begin{alertblock}{Cần double-check khi setup thực tế}
+Link/checkpoint/license có thể đã đổi theo thời gian --- luôn vào đúng repo (\texttt{openpi}, ManiSkill, \texttt{peract/peract}, \texttt{NVlabs/RVT}) xác nhận lại trước khi setup: format checkpoint, version dependency, và điều khoản sử dụng (đặc biệt $\pi_0$ host qua S3 của Physical Intelligence).
+\end{alertblock}
+\end{frame}
+
+\begin{frame}[t,shrink=8]{Vì sao Stage 7a--7c không chạy được như prototype 2D}
+\begin{itemize}
+    \item Toàn bộ Stage 0--4 + baseline (Report 1 \& 2) chạy tốt trên Windows + venv Python thuần (\texttt{numpy}/\texttt{cvxpy}) --- không cần OS đặc biệt, vì \texttt{Reach-Avoid-2D} không có physics/rendering engine compiled nào cả.
+    \item LIBERO/ManiSkill2/RLBench (Stage 7a--7c) khác hẳn: mỗi benchmark bọc quanh một physics/rendering engine biên dịch sẵn, và official install của cả 3 đều nhắm Ubuntu:
+    \begin{itemize}
+        \item \textbf{LIBERO}: robosuite + MuJoCo --- offscreen renderer (EGL/OSMesa) và một số dependency compiled chỉ có wheel Linux ổn định.
+        \item \textbf{ManiSkill2}: SAPIEN --- thế mạnh chính là GPU-parallel simulation (hàng trăm/nghìn env song song trên 1 GPU) qua Vulkan + driver NVIDIA Linux; không có tương đương ổn định trên Windows.
+        \item \textbf{RLBench}: CoppeliaSim qua PyRep --- CoppeliaSim có build Windows, nhưng toàn bộ tooling/community của RLBench giả định Ubuntu (đặc biệt cho training headless trên server không màn hình).
+    \end{itemize}
+    \item Train diffusion/flow policy (Stage 6a--7c) cũng cần CUDA thật cho GPU --- không tách rời được khỏi nhu cầu "có một môi trường Linux ổn định".
+\end{itemize}
+\end{frame}
+
+\begin{frame}[t,shrink=8]{So sánh 4 hướng setup Linux}
+\footnotesize
+\begin{center}
+\begin{tabular}{@{}l l l l@{}}
+\toprule
+\textbf{Hướng} & \textbf{GPU/CUDA training} & \textbf{Công sức setup} & \textbf{Reproducibility} \\
+\midrule
+1. Dual Boot & \good{Tốt nhất (native)} & Cao & Trung bình \\
+2. VM chia RAM (VirtualBox/VMware) & \bad{Kém/không có} & Thấp & Trung bình \\
+3. Docker (Desktop, WSL2 backend) & \good{Tốt} & Trung bình & \good{Cao nhất} \\
+4. WSL2 trực tiếp (không qua Docker) & \good{Tốt} & \good{Thấp nhất} & Trung bình \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{6pt}
+\begin{itemize}
+    \item \textbf{1. Dual Boot} --- GPU chạy native, hiệu năng tốt nhất; trên máy cá nhân đây là lựa chọn hợp lý cho phần train nặng (Stage 7a--7c) --- vẫn nên backup dữ liệu trước khi chia lại ổ đĩa, và chấp nhận phải reboot để đổi qua lại Windows/Linux.
+    \item \textbf{2. VM chia RAM kiểu VirtualBox/VMware Workstation} --- hypervisor desktop thường \emph{không} hỗ trợ GPU passthrough cho CUDA training thật, chỉ chạy CPU trong VM --- không giải quyết được nhu cầu chính (train policy cần GPU).
+    \item \textbf{3. Docker (Desktop, WSL2 backend) + NVIDIA Container Toolkit} --- hỗ trợ CUDA khá mature từ $\sim$2021, và nhiều benchmark có sẵn Dockerfile chính thức (pin đúng version) $\Rightarrow$ reproducibility cao nhất. Docker Desktop free cho cá nhân/nghiên cứu; nếu dùng cho công việc gắn với công ty lớn, licensing của Docker dựa trên \emph{cách dùng} hơn là máy nào --- nên tự kiểm tra điều khoản hiện hành nếu không chắc.
+    \item \textbf{4. WSL2 trực tiếp} --- về bản chất vẫn là 1 VM nhẹ (Hyper-V), nhưng Microsoft+NVIDIA xây riêng CUDA passthrough chính thức cho nó (khác hẳn VM desktop ở mục 2) --- setup chỉ cần \texttt{wsl --install}, không đụng tới ổ đĩa/dual-boot. Rendering offscreen (EGL) cho robosuite/CoppeliaSim đôi khi cần thêm cấu hình WSLg.
+\end{itemize}
+\end{frame}
+
+\begin{frame}[t,shrink=8]{Đề xuất cụ thể theo giai đoạn}
+\begin{itemize}
+    \item \textbf{Giai đoạn hiện tại} (Stage 6a, policy nhỏ trên \texttt{Reach-Avoid-2D}): giữ nguyên Windows + venv --- chưa cần Linux gì cả.
+    \item \textbf{Khi bắt đầu Stage 7a--7c} (LIBERO/ManiSkill2/RLBench thật), trên máy cá nhân:
+    \begin{enumerate}
+        \item \textbf{WSL2 trước tiên} để thử nhanh --- cài Ubuntu 22.04 (có CUDA, không cần reboot), test riêng từng benchmark: LIBERO/RLBench nhiều khả năng cài được ngay; ManiSkill2 (GPU-parallel qua Vulkan) cần kiểm tra kỹ trong WSL2 trước khi tin tưởng.
+        \item Nếu WSL2 đủ ổn (đặc biệt cho LIBERO $\pi_0$ checkpoint, xem slide trước) --- \textbf{có thể dừng ở đây}, không cần dual-boot.
+        \item Nếu vướng driver/rendering (nhiều khả năng nhất ở ManiSkill2's Vulkan), hoặc muốn hiệu năng full cho train dài hạn: \textbf{dual boot} sang Ubuntu --- máy cá nhân nên đây hoàn toàn khả thi, không còn ràng buộc IT như suy nghĩ ban đầu.
+        \item Nếu máy cá nhân không đủ GPU mạnh cho training thật: thuê \textbf{cloud GPU instance Ubuntu} (AWS/GCP/Lambda Labs...) --- trả phí theo giờ, tránh phải đầu tư phần cứng.
+        \item \textbf{Docker} dùng để đóng gói môi trường reproducible \emph{sau khi} đã có Linux (WSL2, dual-boot, hoặc cloud instance) --- không phải giải pháp thay cho ``có Linux'', mà là lớp đóng gói thêm vào.
+    \end{enumerate}
+    \item \textbf{Bỏ qua} VM chia RAM kiểu VirtualBox/VMware cho mục đích train GPU --- chỉ hợp để đọc code/test phần không cần GPU.
+\end{itemize}
+\end{frame}
+
+%=====================================================================
+\section{Phần IV --- Đào sâu khung P-R-C-S}
+%=====================================================================
+
+\begin{frame}[t,shrink=8]{Nhắc lại: một decision step trong P-R-C-S}
+\begin{block}{Ghi chú tên gọi}
+Khung 4 bước của \st{} được paper gọi là \textbf{P-R-C-S} (Propose $\to$ Reach $\to$ Certify $\to$ Select/Repair) --- dùng xuyên suốt Report 1 và toàn bộ code. Report này đào sâu từng chữ cái thành một mục riêng bên dưới.
+\end{block}
+\vspace{4pt}
+\begin{center}
+\[
+\pi_\theta(o_t)\;\xrightarrow{\textbf{P}}\;\{a^{(i)}\}_{i=1}^K\;\xrightarrow{\textbf{R}}\;\hat{\mathcal R}^{(i)}_{0:H}\;\xrightarrow{\textbf{C}}\;\rho(\varphi,\hat{\mathcal R}^{(i)})\;\xrightarrow{\textbf{S}}\;a^\star\ \text{hoặc}\ \pi_{fb}
+\]
+\end{center}
+\vspace{4pt}
+\begin{itemize}
+    \item \textbf{Không sửa $\pi_\theta$}: shield chỉ quyết định chunk nào (gốc hoặc đã repair) được thực thi.
+    \item Mỗi mục dưới đây theo đúng khuôn: \textbf{Trích dẫn} $\to$ \textbf{Công thức (paper)} $\to$ \textbf{Mapping code}.
+\end{itemize}
+\end{frame}
+
+%---------------------------------------------------------------------
+\begin{frame}[t,shrink=8]{Mục 1 --- (P) Propose: đề xuất $K$ candidate chunk}
+
+\textbf{Trích dẫn.} $\pi_\theta$ là generative policy học từ hai cơ chế phổ biến:
+C. Chi et al., \emph{``Diffusion Policy: Visuomotor Policy Learning via Action Diffusion,''} RSS 2023~[1]; Y. Lipman et al., \emph{``Flow Matching for Generative Modeling,''} ICLR 2023~[4].
+
+\vspace{5pt}
+\textbf{Công thức (paper, Sec.~III-C, trước Eq.~1).}
+\[
+\{a^{(i)}\}_{i=1}^{K}\sim\pi_\theta(\cdot\mid o_t),\qquad g(a^{(i)})\ \text{= task-progress score}.
+\]
+$K$ nhỏ (paper dùng $K=8$) --- ``shield lọc, không tìm kiếm toàn bộ action space.''
+
+\vspace{5pt}
+\textbf{Mapping code.}
+\begin{itemize}
+    \item \texttt{shortstop/policy.py:GaussianChunkPolicy.propose()} --- \emph{stand-in} Gaussian cho $\pi_\theta$ thật, sinh $K=$\texttt{n\_candidates} chunk quanh một reference velocity. Từ Stage~6a có thêm \texttt{DiffusionChunkPolicy.propose()} cùng interface --- DDPM/DDIM thật (\texttt{shortstop/diffusion\_policy.py}), xem Table~2b (Phần~II).
+    \item Gọi từ \texttt{shortstop/experiment.py:run\_episode()}, dòng \texttt{candidates = policy.propose(state)}.
+    \item $g(a)$ hiện là \texttt{-\/-goal\_distance} (mỗi \texttt{\_score()} trong \texttt{shield.py}/\texttt{baselines.py}) --- \emph{đơn giản hoá}: chưa dùng policy likelihood hay learned value như paper cho phép.
+\end{itemize}
+\end{frame}
+
+%---------------------------------------------------------------------
+\begin{frame}[t,shrink=8]{Mục 2 --- (R) Reach: lan truyền reachtube sound}
+
+\textbf{Trích dẫn.} Soundness contract của set-propagation --- nguồn của Assumption 1:
+M. Althoff, \emph{``An Introduction to CORA 2015,''} ARCH 2015~[44]; X. Chen, E. Ábrahám, S. Sankaranarayanan, \emph{``Flow*: An Analyzer for Non-Linear Hybrid Systems,''} CAV 2013~[45].
+
+\vspace{5pt}
+\textbf{Công thức Eq.~(1).}
+\[
+\hat{\mathcal R}_{k+1}=\hat f\bigl(\hat{\mathcal R}_k,a_{t+k}\bigr)\oplus \mathcal B\bigl(\varepsilon_k+\bar w\bigr),\qquad \varepsilon_k=\sup_{x\in\hat{\mathcal R}_k}\varepsilon(x,a_{t+k}).
+\]
+
+\vspace{5pt}
+\textbf{Mapping code} (\texttt{shortstop/reach.py}).
+\begin{itemize}
+    \item \texttt{class Box} --- interval/axis-aligned box, thay cho zonotope đầy đủ của paper (\texttt{low}, \texttt{high}, \texttt{inflate()} = $\oplus\,\mathcal B(r)$, \texttt{shift()} = ảnh của $\hat f$).
+    \item \texttt{propagate(box, action, dt, w\_bar, model\_error)} --- đúng 1 bước Eq.~(1); $\hat f$ ở đây là point-mass model $x_{t+1}=x_t+a\,dt$ nên \texttt{model\_error=0} trong Phase~1 (vì $\hat f\equiv f$ chính xác, không có sai số mô hình thật).
+    \item \texttt{propagate\_tube(x0, actions, dt, w\_bar)} --- lặp \texttt{propagate} để dựng cả $\hat{\mathcal R}_{0:H}$ từ một điểm khởi đầu.
+    \item $\bar w$ không lấy ground-truth mà được \texttt{shortstop/calibration.py:calibrate\_w\_bar()} ước lượng từ quantile 99\% residual thực đo được (đúng recipe Table VII của paper).
+\end{itemize}
+\end{frame}
+
+%---------------------------------------------------------------------
+\begin{frame}[t,shrink=8]{Mục 3 --- (C) Certify: STL robustness-to-go trên tube}
+
+\textbf{Trích dẫn.} O. Maler, D. Nickovic, \emph{``Monitoring Temporal Properties of Continuous Signals,''} FORMATS 2004~[47]; A. Donzé, O. Maler, \emph{``Robust Satisfaction of Temporal Logic over Real-Valued Signals,''} FORMATS 2010~[48]; G. Fainekos, G. Pappas~[49] (soundness của STL quantitative semantics, dùng trong Theorem~1); J. Deshmukh et al., \emph{``Robust Online Monitoring of STL,''} FMSD 2017~[53] --- interval semantics cụ thể (Assumption 2), cũng chính là nguồn của baseline \texttt{STL-Monitor}.
+
+\vspace{5pt}
+\textbf{Công thức Eq.~(2).}
+\[
+\rho(\varphi,\hat{\mathcal R})=\min_{0\le k\le H}\ \inf_{x\in\hat{\mathcal R}_k}\ \mathrm{dist}(x,X_u).
+\]
+
+\vspace{5pt}
+\textbf{Mapping code} (\texttt{shortstop/stl.py}).
+\begin{itemize}
+    \item \texttt{step\_robustness(box, obstacles)} --- $\inf_{x\in\text{box}}\mathrm{dist}(x,X_u)$; closed-form vì $X_u$ là hợp các hình tròn $\Rightarrow$ quy về \texttt{box.closest\_point(center)}.
+    \item \texttt{robustness\_to\_go(tube, obstacles)} --- $\min$ qua $k=1..H$ (bỏ $\hat{\mathcal R}_0$ vì đã "realized", cùng convention với \texttt{ReachOnlyShield}).
+    \item Test chấp nhận: \texttt{shortstop/shield.py:STLShield.\_admissible()} $\Leftrightarrow \rho\ge\varepsilon$ (margin, \texttt{EPSILON=0.05} trong \texttt{run\_ablation.py}) --- khác Stage~1 (\texttt{ReachOnlyShield}) vốn chỉ nhị phân \texttt{intersects\_any()}.
+\end{itemize}
+\end{frame}
+
+%---------------------------------------------------------------------
+\begin{frame}[t,shrink=8]{Mục 4 --- (S) Select/Repair, phần 1: tìm counterexample}
+
+\textbf{Trích dẫn.} A. Solar-Lezama et al., \emph{``Combinatorial Sketching for Finite Programs,''} ASPLOS 2006~[10] (CEGIS gốc); E. Clarke et al., \emph{``Counterexample-Guided Abstraction Refinement,''} CAV 2000~[11] (CEGAR); công cụ falsification CPS: S-TaLiRo~[12], Breach~[13], VerifAI~[14], survey black-box safety validation~[15].
+
+\vspace{5pt}
+\textbf{Công thức Eq.~(3).}
+\[
+(k^\star,x^\star)=\arg\min_{0\le k\le H,\ x\in\hat{\mathcal R}_k}\ \mathrm{dist}(x,X_u).
+\]
+Paper giải bằng $M$ bước projected-gradient/vertex sampling trên zonotope generators.
+
+\vspace{5pt}
+\textbf{Mapping code.}
+\begin{itemize}
+    \item \texttt{shortstop/stl.py:find\_counterexample(tube, obstacles)} --- closed-form box-vs-circle search (thay numeric $M$-step search, vì bài toán ở đây có nghiệm đóng: box + disk); trả \texttt{step}, \texttt{obstacle}, \texttt{witness}, \texttt{robustness}.
+    \item \texttt{shortstop/shield.py:CEShield.\_diagnose()} --- gọi \texttt{find\_counterexample} cho \emph{mọi} candidate bị reject, lưu song song với \texttt{admissible\_mask}. Đây là bước chuẩn bị cho repair (Stage~3 chưa tự sửa gì, chỉ định vị lỗi).
+\end{itemize}
+\end{frame}
+
+%---------------------------------------------------------------------
+\begin{frame}[t,shrink=8]{Mục 4 (tiếp) --- (S) Select/Repair, phần 2: sửa + chọn}
+
+\textbf{Công thức Eq.~(4) --- repair.}
+\[
+d=\nabla_a\,\mathrm{dist}\bigl(\phi(x_t,a)_{k^\star},X_u\bigr)\Big|_{a=a^{(i)}},\qquad a'=\Pi_{A,\delta}\bigl(a^{(i)}+\eta\,d\bigr).
+\]
+\textbf{Công thức Eq.~(5) --- selection.}
+\[
+a^\star=\arg\max_{i:\ \rho(\varphi,\hat{\mathcal R}^{(i)})\ge\varepsilon}\ g(a^{(i)}).
+\]
+
+\vspace{5pt}
+\textbf{Mapping code} (\texttt{shortstop/shield.py:RepairShield}).
+\begin{itemize}
+    \item \texttt{\_repair\_direction()} --- hướng $d$ = witness $-$ obstacle center, chuẩn hoá (fallback: hướng từ nominal-rollout point nếu witness trùng tâm obstacle).
+    \item \texttt{\_repair()} --- 1 bước gradient $\eta=$\texttt{step\_size}, chiếu $\Pi_{A,\delta}$ qua \texttt{\_project\_to\_trust\_region()} ($\delta=$\texttt{trust\_region}), rồi re-certify; \texttt{max\_repair\_iters=1} khớp đúng Algorithm~1 dòng 7--13 (một bước, không retry) --- $>1$ là mở rộng CEGIS-style (lặp tìm counterexample mới), \emph{vượt ra ngoài} paper.
+    \item \texttt{select()} --- vòng lặp Eq.~(5) trên tập admissible (gốc + đã repair); nếu rỗng $\to$ fallback \texttt{np.zeros\_like} ($\pi_{fb}$ = zero action, đứng yên).
+    \item Tham số paper (Table VII): $\eta=0.05,\ \delta=0.1$; prototype 2D dùng $\eta=0.3,\ \delta=1.0$ (tune riêng theo scale bài toán --- xem \texttt{run\_ablation.py} và docstring \texttt{RepairShield}). \texttt{max\_repair\_iters} chính là biến số của Table~3 (Phần III).
+\end{itemize}
+\end{frame}
+
+%---------------------------------------------------------------------
+\begin{frame}[t,shrink=8]{P-R-C-S $\to$ Assumption 1--3 $\to$ Theorem 1: chuỗi mapping đầy đủ}
+\footnotesize
+\begin{center}
+\begin{tabular}{c|c|l}
+\textbf{Bước} & \textbf{Assumption bảo vệ} & \textbf{Nếu sai thì hỏng ở đâu (code)} \\ \hline
+\textbf{R} (Reach) & Asm.~1: reachtube sound & \texttt{reach.propagate}: $\varepsilon_k+\bar w$ tính thiếu $\Rightarrow$ tube hẹp hơn thật \\
+\textbf{C} (Certify) & Asm.~2: $\rho$ là cận dưới đúng & \texttt{stl.robustness\_to\_go}: sai công thức Eq.~(2) $\Rightarrow$ chứng nhận sai \\
+\textbf{S} (Select) khi $C=\emptyset$ & Asm.~3: tồn tại $\pi_{fb}$ hợp lệ & \texttt{shield.select()}: fallback hiện là zero action --- \emph{chưa} chứng minh $X_s$ bất biến \\
+\end{tabular}
+\end{center}
+\vspace{6pt}
+\begin{alertblock}{Điểm cần Track A giải quyết tiếp (chưa xong, Report 1 Part 6)}
+Fallback \texttt{np.zeros\_like} trong code hiện tại là \emph{giản lược}: nó dừng robot lại, nhưng Assumption~3 đòi hỏi một $\pi_{fb}$ với $X_s$ robust-control-invariant thật sự --- việc chứng minh "đứng yên = an toàn" trong \texttt{Reach-Avoid-2D} chưa được viết ra tường minh.
+\end{alertblock}
+\end{frame}
+
+\end{document}

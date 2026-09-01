@@ -1,0 +1,61 @@
+{
+  "unshielded": {
+    "n_episodes": 500,
+    "violation_rate": 0.784,
+    "success_rate": 0.216,
+    "shield_activation_rate": 0.0,
+    "latency_ms_median": null,
+    "latency_ms_mean": null,
+    "latency_ms_p95": null,
+    "intervention_precision": null,
+    "recovery_rate": null
+  },
+  "conf_thresh": {
+    "n_episodes": 500,
+    "violation_rate": 0.79,
+    "success_rate": 0.21,
+    "shield_activation_rate": 0.4646655684265716,
+    "latency_ms_median": 0.19039999460801482,
+    "latency_ms_mean": 0.19207695479957654,
+    "latency_ms_p95": 0.21399999968707561,
+    "intervention_precision": 0.1348708762501866,
+    "recovery_rate": null,
+    "conservatism_cost": 0.18518518518518523
+  },
+  "mpc_filter": {
+    "n_episodes": 500,
+    "violation_rate": 0.022,
+    "success_rate": 0.902,
+    "shield_activation_rate": 0.9455572520929966,
+    "latency_ms_median": 17.941850004717708,
+    "latency_ms_mean": 19.034725059094583,
+    "latency_ms_p95": 23.127550011849962,
+    "intervention_precision": 0.31210111893908,
+    "recovery_rate": 0.9098217985909656,
+    "conservatism_cost": 0.0
+  },
+  "cbf_shield": {
+    "n_episodes": 500,
+    "violation_rate": 0.18,
+    "success_rate": 0.82,
+    "shield_activation_rate": 0.4813954124701898,
+    "latency_ms_median": 4.9152999999932945,
+    "latency_ms_mean": 5.116109389442129,
+    "latency_ms_p95": 6.209814993781036,
+    "intervention_precision": 0.4736864281801711,
+    "recovery_rate": 1.0,
+    "conservatism_cost": 0.0
+  },
+  "stl_monitor": {
+    "n_episodes": 500,
+    "violation_rate": 0.124,
+    "success_rate": 0.416,
+    "shield_activation_rate": 0.5588615705734773,
+    "latency_ms_median": 0.8680999744683504,
+    "latency_ms_mean": 0.8800382220571136,
+    "latency_ms_p95": 0.9980000060750172,
+    "intervention_precision": 1.0,
+    "recovery_rate": null,
+    "conservatism_cost": 0.05555555555555558
+  }
+}
