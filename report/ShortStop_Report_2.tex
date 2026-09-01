@@ -30,8 +30,8 @@
 \begin{itemize}
     \item \textbf{Phần I --- Lý thuyết sâu: khung P-R-C-S.} Từng chữ cái (Propose, Reach, Certify, Select/Repair) được tách thành một mục riêng: trích dẫn paper gốc, công thức paper dùng, và mapping trực tiếp với code trong \texttt{shortstop/}.
     \item \textbf{Phần II --- Baseline methods (in progress).} Sáu hệ thống so sánh trong Table II của paper, cơ chế + trạng thái tái lập hiện tại.
-    \item \textbf{Phần III --- Implementation: kết quả thực nghiệm.} 2 bảng chính (thêm từng stage; so baseline) từ \texttt{results/ablation.json} và \texttt{results/baselines.json}, cộng 1 bảng optional từ \texttt{results/stage34\_iters\_comparison.json} cho thấy đang tuning.
-    \item Toàn bộ số liệu trong report này chạy trên \texttt{Reach-Avoid-2D} với policy Gaussian giả lập (Track B, xem Report 1) --- \emph{chưa} phải generative policy thật hay 3 benchmark thật.
+    \item \textbf{Phần III --- Implementation: kết quả thực nghiệm.} 2 bảng chính (thêm từng stage; so baseline) từ \texttt{results/ablation.json} và \texttt{results/baselines.json}, cộng Table~2b chạy lại với policy diffusion thật đã train (\texttt{results/ablation\_diffusion.json}), cộng 1 bảng optional từ \texttt{results/stage34\_iters\_comparison.json} cho thấy đang tuning.
+    \item Table 1--3 chạy trên \texttt{Reach-Avoid-2D} với policy Gaussian giả lập (Track B, xem Report 1); Table 2b chạy lại đúng setup đó nhưng với một diffusion policy nhỏ đã train thật (Stage 6a) --- vẫn \emph{chưa} phải 3 benchmark thật (LIBERO/ManiSkill2/RLBench, Stage 7a--7c).
 \end{itemize}
 \end{frame}
 
@@ -85,14 +85,14 @@ Baselines --- MPC-Filter, CBF-Shield, STL-Monitor, Conf-Thresh (Gaussian; 4/4 đ
 \good{Đã xong} \\
 \hline
 \textbf{Stage 6a} --- Generative policy, bản nhỏ (Diffusion Policy/flow matching). &
-Chưa bắt đầu &
-2D policy thật --- train một diffusion/flow policy nhỏ trên \texttt{Reach-Avoid-2D}, hoặc import policy có sẵn. &
-Chưa bắt đầu \\
+\good{Đã xong} &
+2D policy thật --- scripted expert đa mode $\to$ dataset (500 demo) $\to$ \texttt{ConditionalUnet1D} (108K tham số) train 5000 step $\to$ thế \texttt{GaussianChunkPolicy} (Table~2b). &
+\good{Đã xong} \\
 \hline
 \textbf{Stage 6b} --- Safety guarantee (bounded-time $\to$ all-time, Grönwall trade-off); Report 2 mới nhắc lại, chưa tự chứng minh. &
 Chưa bắt đầu &
-Metrics + stress test --- 7 metric, horizon sweep, bootstrap, \textbf{chạy lại với policy 2D thật thay Gaussian}. &
-Chưa bắt đầu \\
+Metrics + stress test --- Table~1/2 đã \good{chạy lại với policy 2D thật} (Table~2b); horizon sweep + bootstrap với policy thật thì \wip{chưa}. &
+\wip{Một phần} \\
 \hline
 \end{tabularx}
 \vspace{4pt}
@@ -122,7 +122,7 @@ Chưa bắt đầu (tuỳ resource GPU) \\
 \hline
 \end{tabularx}
 \vspace{4pt}
-\footnotesize\textit{So với Report 1: Stage 1--4 (cả Track A và Track B) và code của 4 baseline (Track B, Stage 5) đã chuyển từ ``chưa bắt đầu'' sang \good{đã xong}. Lý thuyết gốc của baseline (Track A, Stage 5) là mảnh còn lại gần nhất, đang \wip{tìm hiểu}; Stage 6a trở đi vẫn y nguyên so với Report 1.}
+\footnotesize\textit{So với Report 1: Stage 1--4 (cả Track A và Track B), code của 4 baseline (Track B, Stage 5), và giờ cả Stage 6a (cả Track A và Track B) đã chuyển từ ``chưa bắt đầu'' sang \good{đã xong}. Lý thuyết gốc của baseline (Track A, Stage 5) và phần metric/stress-test mở rộng của Stage 6b (Track B) là 2 mảnh còn lại gần nhất, đang \wip{tìm hiểu}/\wip{một phần}; Stage 7a trở đi vẫn y nguyên so với Report 1.}
 \end{frame}
 
 %=====================================================================
@@ -150,7 +150,7 @@ Chưa bắt đầu (tuỳ resource GPU) \\
 
 \vspace{6pt}
 \begin{alertblock}{Trạng thái tổng thể: \wip{IN PROGRESS}}
-Tất cả 6 hệ thống mới chạy trên \texttt{Reach-Avoid-2D} + policy Gaussian giả lập, cùng $\hat f$/$\varepsilon$/fallback để so sánh công bằng (đúng nguyên tắc paper). \emph{Chưa} chạy trên diffusion/flow policy thật, và \emph{chưa} chạy trên LIBERO/ManiSkill2/RLBench --- khớp Stage 6a/7a--7c (Track B, Report 1) vẫn ``chưa bắt đầu.''
+Cả 6 hệ thống đã chạy trên \texttt{Reach-Avoid-2D}, cùng $\hat f$/$\varepsilon$/fallback để so sánh công bằng (đúng nguyên tắc paper) --- ban đầu với policy Gaussian giả lập, và giờ \good{đã chạy lại thêm} với một diffusion policy nhỏ đã train thật (Stage~6a, xem Table~2b, Phần~II). \emph{Chưa} chạy trên LIBERO/ManiSkill2/RLBench --- khớp Stage 7a--7c (Track B, Report 1) vẫn ``chưa bắt đầu.''
 \end{alertblock}
 \end{frame}
 
@@ -158,12 +158,12 @@ Tất cả 6 hệ thống mới chạy trên \texttt{Reach-Avoid-2D} + policy Ga
 \section{Phần II --- Implementation: kết quả thực nghiệm}
 %=====================================================================
 
-\begin{frame}[t,shrink=8]{Thiết lập chung cho 3 bảng dưới đây}
+\begin{frame}[t,shrink=8]{Thiết lập chung cho 4 bảng dưới đây}
 \begin{itemize}
     \item \textbf{Env}: \texttt{Reach-Avoid-2D}, start/goal cố định, 3 obstacle tròn vị trí/bán kính ngẫu nhiên mỗi episode (\texttt{shortstop/experiment.py:make\_scenario}).
-    \item \textbf{Policy}: \texttt{GaussianChunkPolicy}, $K=8$, $H=8$ (stand-in cho $\pi_\theta$ thật).
+    \item \textbf{Policy}: \texttt{GaussianChunkPolicy}, $K=8$, $H=8$ (stand-in cho $\pi_\theta$ thật) cho Table~1--3; Table~2b thay bằng \texttt{DiffusionChunkPolicy} (Stage~6a, đã train) --- cùng $K=8$, $H=8$, chỉ đổi nguồn candidate.
     \item \textbf{Calibration}: $\bar w$ certify = quantile 99\% $\times$ 1.25 trên 200 episode held-out (\texttt{shortstop/calibration.py}), không phải ground-truth $\bar w=0.02$ cho không.
-    \item \textbf{Table 1 \& 2}: 500 episodes/hàng, cùng seed offset --- so sánh trực tiếp được với nhau.
+    \item \textbf{Table 1, 2 \& 2b}: 500 episodes/hàng, cùng seed offset --- so sánh trực tiếp được với nhau (kể cả giữa 2 và 2b, vì chỉ policy đổi).
     \item \textbf{Table 3 (optional)}: 300 episodes/hàng, chạy riêng để quét \texttt{max\_repair\_iters} --- \emph{không} so số tuyệt đối với Table 1/2, chỉ so nội bộ 3 hàng với nhau.
 \end{itemize}
 \end{frame}
@@ -203,6 +203,32 @@ STL-Monitor~[53] & 12.4 & 41.6 & 55.9 & 0.87 & 100.0 & n/a & 5.6 \\
 \bottomrule
 \end{tabular}
 \end{center}
+\end{frame}
+
+%---------------------------------------------------------------------
+\begin{frame}[t,shrink=8]{Table 2b --- Table 2 chạy lại với Stage 6a: policy diffusion thật (\texttt{results/ablation\_diffusion.json})}
+\scriptsize
+\begin{center}
+\begin{tabular}{@{}l r r r@{}}
+\toprule
+\textbf{Hệ thống} & \textbf{Viol.\% (Gauss$\to$Diff)} & \textbf{Succ.\% (Gauss$\to$Diff)} & \textbf{Act.\% (Gauss$\to$Diff)} \\
+\midrule
+Unshielded & 78.4 $\to$ \textbf{67.0} & 21.6 $\to$ \textbf{32.0} & --- \\
+Conf-Thresh & 79.0 $\to$ 76.6 & 21.0 $\to$ 23.4 & 46.5 $\to$ \textbf{77.7} \\
+MPC-Filter~[33] & 2.2 $\to$ \textbf{0.4} & 90.2 $\to$ \textbf{94.8} & 94.6 $\to$ 39.3 \\
+CBF-Shield~[38,39] & 18.0 $\to$ \textbf{6.0} & 82.0 $\to$ \textbf{86.8} & 48.1 $\to$ 38.5 \\
+STL-Monitor~[53] & 12.4 $\to$ \bad{31.0} & 41.6 $\to$ 65.2 & 55.9 $\to$ 38.0 \\
+\st{} (Stage 4) & \textbf{0.2 $\to$ 0.0} & 38.4 $\to$ \textbf{88.8} & 60.3 $\to$ 35.6 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{6pt}
+\begin{itemize}
+    \item \textbf{Setup}: đúng pipeline Stage 6a --- \texttt{shortstop/expert.py} (scripted planner, đa mode upper/lower) $\to$ \texttt{shortstop/dataset.py} (500 demo, 36693 window) $\to$ \texttt{shortstop/diffusion\_policy.py} (\texttt{ConditionalUnet1D} 108K tham số, DDPM 100 train-step/10 DDIM infer-step) $\to$ \texttt{scripts/train\_diffusion\_policy.py} (5000 gradient step, 85.5s CPU) $\to$ \texttt{shortstop/policy.py:DiffusionChunkPolicy} thế chỗ \texttt{GaussianChunkPolicy} trong \texttt{run\_episode()} (tham số \texttt{policy\_factory} mới). Cùng 500 episode, cùng seed offset với Table~2.
+    \item \textbf{Khoảng cách \st{}~vs.~MPC-Filter thu hẹp mạnh}: success $38.4\%\to88.8\%$ (so MPC-Filter $90.2\%\to94.8\%$) --- từ cách nhau 52 điểm còn 6 điểm, và \st{} còn an toàn hơn (violation $0.0\%$ vs.\ $0.4\%$). Do candidate từ policy thật đều hướng đúng nên tỉ lệ được accept/repair thành công cao hơn hẳn so với candidate gần-random của Gaussian.
+    \item \textbf{Conf-Thresh lộ rõ điểm yếu hơn}: activation nhảy $46.5\%\to77.7\%$ (giờ có đa mode thật để ``disagree'') nhưng violation/success gần như không đổi --- ensemble thật xác nhận đúng nghi vấn ở ghi chú $^\dagger$ (Phần~I): reject theo disagreement không phân biệt được ``khác nhau'' (2 route upper/lower, mỗi route riêng vẫn an toàn) với ``nguy hiểm''.
+    \item \textbf{STL-Monitor tệ đi} ($12.4\%\to31.0\%$ violation) --- phát hiện mới: không cộng disturbance bound (chỉ check nominal rollout), nên khi policy thật đi sát obstacle hơn (thay vì đường ngẫu nhiên của Gaussian), noise dễ đẩy qua ranh giới mà STL-Monitor không bắt được.
+\end{itemize}
 \end{frame}
 
 %---------------------------------------------------------------------
@@ -344,7 +370,7 @@ $K$ nhỏ (paper dùng $K=8$) --- ``shield lọc, không tìm kiếm toàn bộ 
 \vspace{5pt}
 \textbf{Mapping code.}
 \begin{itemize}
-    \item \texttt{shortstop/policy.py:GaussianChunkPolicy.propose()} --- \emph{stand-in} Gaussian cho $\pi_\theta$ thật (chưa có diffusion/flow policy, xem Stage 6a của Report 1), sinh $K=$\texttt{n\_candidates} chunk quanh một reference velocity.
+    \item \texttt{shortstop/policy.py:GaussianChunkPolicy.propose()} --- \emph{stand-in} Gaussian cho $\pi_\theta$ thật, sinh $K=$\texttt{n\_candidates} chunk quanh một reference velocity. Từ Stage~6a có thêm \texttt{DiffusionChunkPolicy.propose()} cùng interface --- DDPM/DDIM thật (\texttt{shortstop/diffusion\_policy.py}), xem Table~2b (Phần~II).
     \item Gọi từ \texttt{shortstop/experiment.py:run\_episode()}, dòng \texttt{candidates = policy.propose(state)}.
     \item $g(a)$ hiện là \texttt{-\/-goal\_distance} (mỗi \texttt{\_score()} trong \texttt{shield.py}/\texttt{baselines.py}) --- \emph{đơn giản hoá}: chưa dùng policy likelihood hay learned value như paper cho phép.
 \end{itemize}

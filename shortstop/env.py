@@ -10,6 +10,16 @@ class Obstacle:
         return np.linalg.norm(np.asarray(point) - self.center) <= self.radius
 
 
+def encode_obstacles(obstacles):
+    """Fixed-size, permutation-invariant obstacle encoding: 3 obstacles x
+    (cx, cy, r), sorted by center x so a network doesn't have to learn
+    invariance to input order. Shared by shortstop.dataset (building BC
+    windows) and shortstop.policy (conditioning DiffusionChunkPolicy).
+    """
+    rows = sorted(([o.center[0], o.center[1], o.radius] for o in obstacles), key=lambda r: r[0])
+    return np.asarray(rows, dtype=float).reshape(-1)
+
+
 class ReachAvoid2D:
     """Point-mass 2D reach-avoid environment (Sec. V, Reach-Avoid-2D prototype).
 

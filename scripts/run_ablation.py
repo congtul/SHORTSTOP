@@ -56,7 +56,39 @@ from shortstop.calibration import calibrate_w_bar
 from shortstop.env import ReachAvoid2D
 from shortstop.experiment import make_scenario, run_episode
 from shortstop.metrics import aggregate, conservatism_cost
+from shortstop.policy import DiffusionChunkPolicy
 from shortstop.shield import CEShield, ReachOnlyShield, RepairShield, STLShield
+
+# "gaussian" (default) = every stage/baseline sees the same GaussianChunkPolicy
+# stand-in as always (unchanged output: results/ablation.json). "diffusion" =
+# swap in the Stage 6a trained policy (scripts/train_diffusion_policy.py's
+# checkpoint) for every row instead, and save to results/ablation_diffusion.json
+# so the two runs stay side by side for comparison, rather than one overwriting
+# the other.
+#   .venv/Scripts/python.exe scripts/run_ablation.py diffusion
+POLICY = sys.argv[1] if len(sys.argv) > 1 else "gaussian"
+DIFFUSION_CHECKPOINT = "results/diffusion_policy.pt"
+
+
+def build_policy_factory(policy_name):
+    if policy_name == "gaussian":
+        return None  # run_episode's own default: builds GaussianChunkPolicy
+    if policy_name == "diffusion":
+        from shortstop.diffusion_policy import load_checkpoint
+
+        model, schedule, cond_mean, cond_std, info = load_checkpoint(DIFFUSION_CHECKPOINT)
+        print(
+            f"Loaded {DIFFUSION_CHECKPOINT} (trained {info['n_steps']} steps, "
+            f"final_val_loss={info['final_val_loss']:.4f})\n"
+        )
+
+        def factory(goal, obstacles, horizon, n_candidates, rng):
+            return DiffusionChunkPolicy(
+                model, schedule, cond_mean, cond_std, obstacles, n_candidates=n_candidates, rng=rng
+            )
+
+        return factory
+    raise ValueError(f"unknown POLICY {policy_name!r}, expected 'gaussian' or 'diffusion'")
 
 # Shared knobs across every certified stage (Stage 2+), so the only thing that
 # changes row to row is the shield *logic*, not its tuning.
@@ -144,13 +176,14 @@ STAGES = {
 }
 
 
-def run_stage(shield_factory, n_episodes, seed_offset=1000, shield_w_bar=None):
+def run_stage(shield_factory, n_episodes, seed_offset=1000, shield_w_bar=None, policy_factory=None):
     return [
         run_episode(
             shield_factory,
             np.random.default_rng(seed_offset + i),
             w_bar=TRUE_W_BAR,
             shield_w_bar=shield_w_bar,
+            policy_factory=policy_factory,
         )
         for i in range(n_episodes)
     ]
@@ -166,6 +199,8 @@ def fmt_num(x, digits=3):
 
 def main():
     n_episodes = 500
+    policy_factory = build_policy_factory(POLICY)
+    print(f"Policy: {POLICY}\n")
 
     shield_w_bar = None
     if USE_CALIBRATED_W_BAR:
@@ -191,7 +226,8 @@ def main():
         )
 
     logs_by_stage = {
-        name: run_stage(factory, n_episodes, shield_w_bar=shield_w_bar) for name, factory in STAGES.items()
+        name: run_stage(factory, n_episodes, shield_w_bar=shield_w_bar, policy_factory=policy_factory)
+        for name, factory in STAGES.items()
     }
     metrics_by_stage = {name: aggregate(logs) for name, logs in logs_by_stage.items()}
 
@@ -222,11 +258,12 @@ def main():
             row += f"{extract(m):<{width}}"
         print(row)
 
+    out_name = "ablation.json" if POLICY == "gaussian" else f"ablation_{POLICY}.json"
     results_dir = Path(__file__).resolve().parents[1] / "results"
     results_dir.mkdir(exist_ok=True)
-    with open(results_dir / "ablation.json", "w") as f:
+    with open(results_dir / out_name, "w") as f:
         json.dump(metrics_by_stage, f, indent=2)
-    print(f"\nSaved machine-readable results to {results_dir / 'ablation.json'}")
+    print(f"\nSaved machine-readable results to {results_dir / out_name}")
 
 
 if __name__ == "__main__":

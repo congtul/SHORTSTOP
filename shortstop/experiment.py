@@ -46,6 +46,7 @@ def run_episode(
     w_bar=0.02,
     shield_w_bar=None,
     record_decisions=False,
+    policy_factory=None,
 ):
     """Run one episode under `shield_factory`.
 
@@ -59,10 +60,20 @@ def run_episode(
     ground truth for free), but pass a value from
     shortstop.calibration.calibrate_w_bar() to certify against a realistic,
     data-driven estimate instead (see Table VII's calibration recipe).
+
+    `policy_factory(goal, obstacles, horizon, n_candidates, rng) -> policy`
+    swaps out the Propose step; defaults to None, which builds the usual
+    GaussianChunkPolicy stand-in (unchanged behavior for every existing
+    caller). Pass one to run the same shield pipeline against a real
+    trained policy instead (shortstop.policy.DiffusionChunkPolicy) -- see
+    scripts/run_ablation_diffusion.py.
     """
     start, goal, obstacles = make_scenario(rng)
     env = ReachAvoid2D(start=start, goal=goal, obstacles=obstacles, dt=dt, w_bar=w_bar, rng=rng)
-    policy = GaussianChunkPolicy(goal=goal, horizon=horizon, n_candidates=n_candidates, rng=rng)
+    if policy_factory is None:
+        policy = GaussianChunkPolicy(goal=goal, horizon=horizon, n_candidates=n_candidates, rng=rng)
+    else:
+        policy = policy_factory(goal, obstacles, horizon, n_candidates, rng)
     certified_w_bar = w_bar if shield_w_bar is None else shield_w_bar
     shield = shield_factory(goal, obstacles, dt, certified_w_bar) if shield_factory is not None else None
 
