@@ -168,12 +168,13 @@ class _QPCorrectionShield:
     reporting whether an intervention happened) is shared.
     """
 
-    def __init__(self, goal, obstacles, dt, w_bar, max_action_norm=1.0, model_error=0.0):
+    def __init__(self, goal, obstacles, dt, w_bar, max_action_norm=1.0, model_error=0.0, action_dim=2):
         self.goal = np.asarray(goal, dtype=float)
         self.obstacles = obstacles
         self.dt = dt
         self.w_bar = w_bar
         self.max_action_norm = max_action_norm
+        self.action_dim = action_dim
 
     def _build_constraints(self, state, a, a_nominal):
         raise NotImplementedError
@@ -183,7 +184,7 @@ class _QPCorrectionShield:
         chunk = candidates[0].copy()
         a_nominal = chunk[0].copy()
 
-        a = cp.Variable(2)
+        a = cp.Variable(self.action_dim)
         constraints = [cp.norm(a, "inf") <= self.max_action_norm]
         constraints += self._build_constraints(state, a, a_nominal)
         problem = cp.Problem(cp.Minimize(cp.sum_squares(a - a_nominal)), constraints)
@@ -263,12 +264,13 @@ class MPCFilterShield:
     documented as such rather than silently presented as equivalent.
     """
 
-    def __init__(self, goal, obstacles, dt, w_bar, max_action_norm=1.0, model_error=0.0):
+    def __init__(self, goal, obstacles, dt, w_bar, max_action_norm=1.0, model_error=0.0, action_dim=2):
         self.goal = np.asarray(goal, dtype=float)
         self.obstacles = obstacles
         self.dt = dt
         self.w_bar = w_bar
         self.max_action_norm = max_action_norm
+        self.action_dim = action_dim
 
     def select(self, state, candidates):
         state = np.asarray(state, dtype=float)
@@ -276,9 +278,10 @@ class MPCFilterShield:
         horizon = len(nominal_chunk)
         nominal_path = nominal_rollout(state, nominal_chunk, self.dt)  # length horizon+1
 
-        a = cp.Variable((horizon, 2))
+        a = cp.Variable((horizon, self.action_dim))
         constraints = [cp.norm(a, "inf", axis=1) <= self.max_action_norm]
 
+        fallback_direction = np.eye(self.action_dim)[0]
         x = state
         for k in range(horizon):
             x_next = x + a[k] * self.dt
@@ -286,7 +289,7 @@ class MPCFilterShield:
             for o in self.obstacles:
                 direction = p_nominal - o.center
                 norm = np.linalg.norm(direction)
-                n = direction / norm if norm > 1e-9 else np.array([1.0, 0.0])
+                n = direction / norm if norm > 1e-9 else fallback_direction
                 constraints.append(n @ (x_next - o.center) >= o.radius + self.w_bar)
             x = x_next
 
@@ -330,8 +333,8 @@ class CBFShield(_QPCorrectionShield):
     approximation (unlike MPC-Filter's tangent-plane linearization).
     """
 
-    def __init__(self, goal, obstacles, dt, w_bar, max_action_norm=1.0, alpha=1.0, model_error=0.0):
-        super().__init__(goal, obstacles, dt, w_bar, max_action_norm, model_error)
+    def __init__(self, goal, obstacles, dt, w_bar, max_action_norm=1.0, alpha=1.0, model_error=0.0, action_dim=2):
+        super().__init__(goal, obstacles, dt, w_bar, max_action_norm, model_error, action_dim)
         self.alpha = alpha
 
     def _build_constraints(self, state, a, a_nominal):
