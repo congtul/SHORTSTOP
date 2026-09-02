@@ -12,7 +12,7 @@ index c0564e4..15a9e78 100644
  ep_len: 360
 -num_sequences: 1000
 -num_videos: 10
-+num_sequences: 1
++num_sequences: 100
 +num_videos: 1
  lang_embeddings: null
  render: False
@@ -23,7 +23,7 @@ index c0564e4..15a9e78 100644
 -debug: False
 -dataset_path: /home/i53/student/yagmurlu/code/mdt_policy/dataset/task_D_D
 -train_folder: /home/i53/student/yagmurlu/code/mdt_policy/pretrained_models/CALVIN ABCD/mdtv_1_abcd
-+debug: True
++debug: False
 +dataset_path: /home/congtul/SHORTSTOP/mdt_policy/dataset/calvin_debug_dataset
 +train_folder: /home/congtul/SHORTSTOP/mdt_policy/pretrained_models/CALVIN_ABCD/mdtv_1_abcd
  model_name: mdt_test
