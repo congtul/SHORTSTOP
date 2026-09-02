@@ -123,6 +123,16 @@ trong, chỉ không phải 1 hàng so sánh riêng).
   BDDL's object list, trừ object đang thao tác, lấy vị trí qua privileged
   sim state) — **chưa code**, vì cần biết chính xác key trong `obs` dict
   của robosuite cho vị trí object, chỉ xem được khi cài LIBERO thật.
+  **Quyết định thiết kế đã chốt (giống CALVIN, xem
+  `STAGE7B_CALVIN_PIPELINE_DESIGN.md` mục "Quyết định thiết kế cho $X_u$"
+  cho lý do đầy đủ)**: obstacle giữ **thuần privileged/hình học**, không
+  spawn object thật vào scene MuJoCo — vì $\pi_{0.5}$ nhận input qua ảnh
+  render thật (`observation/image`/`wrist_image`), spawn object thật sẽ
+  lộ ra trong ảnh, gây vision-domain-shift confound (policy đổi hành vi vì
+  lý do thị giác lạ, không phải vì lý do an toàn). Obstacle chỉ là (center,
+  radius) trong code eval/shield, check qua sphere-chain — camera/ảnh render
+  không đổi gì so với LIBERO gốc. Bản "obstacle hiện thật trong ảnh" để dành
+  làm hướng mở rộng sau, không phải thí nghiệm chính.
 - **Reach step không phải reachtube chứng minh được (sound)**: dùng Jacobian
   pseudo-inverse để suy joint delta từ task-space action — chỉ đúng tại 1
   điểm tuyến tính hóa, giống hệt cảnh báo `MPCFilterShield` đã ghi cho 2D.

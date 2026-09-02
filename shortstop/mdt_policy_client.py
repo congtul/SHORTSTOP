@@ -1,9 +1,10 @@
 """Client for the MDT (Multimodal Diffusion Transformer) policy on CALVIN
 (Stage 7b Propose step).
 
-I/O contract confirmed by reading MDT's own model code
-(`mdt/models/mdt_agent.py`, `MDTAgent.step`/`.denoise_actions`) and CALVIN's
-action-space docs, rather than guessed:
+I/O contract confirmed by reading the real `mdt_policy` checkout's model
+code (`mdt/models/mdtv_agent.py`, class `MDTVAgent` -- the "V" variant
+behind the 6 public `mdtv-*` checkpoints, not the older `MDTAgent` in
+`mdt_agent.py`) and CALVIN's action-space docs, not guessed:
   - observation: a dict with (at least) `rgb_obs["rgb_static"]` (main camera,
     CALVIN default 200x200 RGB) and a `goal` (language-conditioned goal
     embedding) -- same closed-loop-image requirement as LIBERO, see
@@ -22,16 +23,27 @@ action-space docs, rather than guessed:
 
 Because MDT's `step()` hides the chunk, ShortStop cannot sit where it does
 for LIBERO (intercepting the *client's* replan loop) -- instead this client
-must call MDT's own chunk-producing sub-step (the model's forward pass that
-`step()` calls internally when `rollout_step_counter % multistep == 0`,
-returning `pred_action_seq` before MDT's own indexing/caching), then run
-ShortStop's own prefix-execution loop externally, exactly like
-shortstop.experiment.run_episode already does for the 2D prototype. The
-exact public method name for "give me the chunk, don't cache/execute it
-yourself" was not confirmed against a runnable checkout (no GPU/CALVIN in
-this environment) -- likely `model(obs, goal)` (`__call__`/`forward`) itself,
-per the `denoise_actions` code path, but verify this first against a real
-checkout before wiring up Pi05-style serving (see docs/CALVIN_SETUP.md).
+calls `MDTVAgent.forward(obs, goal)` directly (i.e. `self._model(obs, goal)`)
+instead of `.step()`. **Confirmed against the real checkout**:
+`forward()` (`mdtv_agent.py:688`) calls `denoise_actions()` and returns its
+`act_seq` straight back to the caller -- no caching, no indexing, exactly
+one fresh (batch, act_window_size=10, 7) chunk per call, matching `step()`'s
+own internal `pred_action_seq = self(obs, goal)` line. ShortStop then runs
+its own prefix-execution loop externally on that chunk, exactly like
+shortstop.experiment.run_episode already does for the 2D prototype -- this
+*replaces* `step()`'s internal `multistep` counter loop, the two are not
+used together.
+
+Diversity across repeated calls (needed for Propose's "K candidates") is
+also confirmed, not assumed: `denoise_actions()` draws
+`x = torch.randn((len(latent_goal), self.act_window_size, 7), ...) *
+self.sigma_max` fresh on every call, with no seed reset in between --
+so K calls to `propose()` genuinely sample K different chunks. This holds
+for every `sampler_type` in `sample_loop()`, including the ones commented
+"ODE deterministic" (`ddim`/`euler`/`dpm`/`lms`/...) -- those are only
+deterministic *given* a fixed starting noise `x`, and `x` itself is
+resampled every call; the "SDE stochastic" samplers (`ancestral`,
+`euler_ancestral`) add even more per-step noise on top of that.
 """
 import numpy as np
 
@@ -47,7 +59,7 @@ class MDTPolicyClient:
 
     def __init__(self, checkpoint_path, device="cuda", n_candidates=8):
         try:
-            from mdt.models.mdt_agent import MDTAgent
+            from mdt.models.mdtv_agent import MDTVAgent
         except ImportError as e:
             raise ImportError(
                 "MDTPolicyClient needs the mdt_policy package "
@@ -55,16 +67,17 @@ class MDTPolicyClient:
                 "docs/CALVIN_SETUP.md) -- not available in this environment. "
                 "Use MockMDTPolicyClient for structural testing."
             ) from e
-        self._model = MDTAgent.load_from_checkpoint(checkpoint_path).to(device)
+        self._model = MDTVAgent.load_from_checkpoint(checkpoint_path).to(device)
         self.n_candidates = n_candidates
 
     def propose(self, observation):
         """`observation`: dict with `rgb_obs["rgb_static"]` (uint8 HxWx3, and
         optionally `rgb_gripper`), `goal` (language-conditioned goal
         embedding) -- see module docstring. Returns a list of `n_candidates`
-        (act_window_size, 7) action chunks, one fresh diffusion sample per
-        candidate (see module docstring's open question about which model
-        method actually returns the raw, un-cached chunk).
+        (act_window_size, 7) action chunks -- calls `self._model(observation,
+        goal)` (`MDTVAgent.forward`, confirmed to return the raw chunk, see
+        module docstring) once per candidate, each a genuinely fresh
+        diffusion sample (confirmed: fresh `torch.randn` noise per call).
         """
         return [
             np.asarray(self._model(observation, observation["goal"]).squeeze(0).detach().cpu())
