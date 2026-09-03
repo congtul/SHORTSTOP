@@ -27,17 +27,30 @@ script applies afterwards; use it only for structural/mocked testing
 
 When `cfg.debug` (patched default: True -- see patches/mdt_policy_shortstop.patch;
 flip to False only when told to prep for release):
-  - prints min_clearance stats (mean/median/p10/p90/min over every
-    attempted subtask) per radius -- a finer-grained signal than the
-    binary violated/not-violated rate for judging whether a radius is in
-    a sane range before committing to it.
-  - re-runs sequence 0 alone (same per-sequence seed as the main sweep,
-    so it's the exact attempt those metrics/stats already reflect) once
-    per radius with trajectory recording on, and saves one GIF per
-    subtask attempt to VIS_OUTPUT_DIR (see shortstop/calvin_obstacle_viz.py) --
-    printed once at the end.
+  - prints (and logs, see below) min_clearance stats (mean/median/p10/
+    p90/min over every attempted subtask) per radius -- a finer-grained
+    signal than the binary violated/not-violated rate for judging whether
+    a radius is in a sane range before committing to it.
+  - re-runs the first sequence that actually violated at each radius
+    (same per-sequence seed the main sweep already used for it, so it's
+    the exact attempt those metrics/stats already reflect) with
+    trajectory recording on, and saves one GIF per subtask attempt --
+    see shortstop/calvin_obstacle_viz.py.
+
+Everything printed is *also* written to a run-specific output directory
+(printed at the very start and end so it's easy to find) meant to be
+zipped up and handed back for analysis on a machine without this
+env/checkpoint/dataset:
+  outputs/calvin_unshielded_runs/run_<timestamp>/
+    run.log       -- exact copy of everything printed to stdout
+    results.json  -- same numbers, structured (radius -> violation_rate,
+                      success_rate, clearance stats, which sequence/subtask
+                      each GIF came from) -- read this one programmatically
+    gifs/*.gif    -- from the debug obstacle visualization above
 """
+import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import calvin_env
@@ -64,23 +77,50 @@ from shortstop.calvin_obstacle_viz import save_subtask_gif  # noqa: E402
 # range by hand, see module docstring.
 RADII_TO_SWEEP = [0.02, 0.05, 0.08, 0.12]
 
-VIS_OUTPUT_DIR = REPO_ROOT / "outputs" / "calvin_obstacle_viz"
+RUN_OUTPUT_DIR = REPO_ROOT / "outputs" / "calvin_unshielded_runs" / f"run_{datetime.now():%Y%m%d_%H%M%S}"
+VIS_OUTPUT_DIR = RUN_OUTPUT_DIR / "gifs"
+
+_LOG_FILE = None  # opened at the top of main(), see _log()
 
 
-def _print_clearance_debug(label, sequence_results):
+def _log(msg):
+    print(msg)
+    if _LOG_FILE is not None:
+        _LOG_FILE.write(msg + "\n")
+        _LOG_FILE.flush()
+
+
+def _clearance_stats(sequence_results):
+    """Same numbers _print_clearance_debug prints, as a plain dict for
+    results.json -- None if no attempt in this sweep had an obstacle to
+    measure clearance against at all."""
     clearances = [
         a["min_clearance"] for attempts in sequence_results for a in attempts
         if a["min_clearance"] is not None
     ]
     if not clearances:
-        print(f"  [debug] {label}: no attempted subtasks had an obstacle to measure clearance against")
-        return
+        return None
     clearances = np.asarray(clearances)
-    print(
-        f"  [debug] {label}: min_clearance over {len(clearances)} attempted subtasks -- "
-        f"mean={clearances.mean():.4f}  median={np.median(clearances):.4f}  "
-        f"p10={np.percentile(clearances, 10):.4f}  p90={np.percentile(clearances, 90):.4f}  "
-        f"min={clearances.min():.4f}  max={clearances.max():.4f}"
+    return {
+        "n": len(clearances),
+        "mean": float(clearances.mean()),
+        "median": float(np.median(clearances)),
+        "p10": float(np.percentile(clearances, 10)),
+        "p90": float(np.percentile(clearances, 90)),
+        "min": float(clearances.min()),
+        "max": float(clearances.max()),
+    }
+
+
+def _log_clearance_debug(label, stats):
+    if stats is None:
+        _log(f"  [debug] {label}: no attempted subtasks had an obstacle to measure clearance against")
+        return
+    _log(
+        f"  [debug] {label}: min_clearance over {stats['n']} attempted subtasks -- "
+        f"mean={stats['mean']:.4f}  median={stats['median']:.4f}  "
+        f"p10={stats['p10']:.4f}  p90={stats['p90']:.4f}  "
+        f"min={stats['min']:.4f}  max={stats['max']:.4f}"
     )
 
 
@@ -115,10 +155,12 @@ def _save_debug_gifs(
     )
     VIS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     safe_radius = str(radius).replace(".", "p")
+    gif_paths = []
     for i, attempt in enumerate(attempts):
         out_path = VIS_OUTPUT_DIR / f"seq{sequence_idx}_subtask{i}_r{safe_radius}.gif"
         save_subtask_gif(attempt["trajectory"], attempt["obstacle"], str(out_path))
-    return len(attempts)
+        gif_paths.append(str(out_path.relative_to(RUN_OUTPUT_DIR)))
+    return gif_paths
 
 
 class _ForwardOnlyPolicy:
@@ -141,6 +183,13 @@ class _ForwardOnlyPolicy:
 
 @hydra.main(config_path="../mdt_policy/conf", config_name="mdt_evaluate")
 def main(cfg):
+    global _LOG_FILE
+    RUN_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    _LOG_FILE = open(RUN_OUTPUT_DIR / "run.log", "w", encoding="utf-8")
+    _log(f"[run] writing log + results.json (+ gifs/ if any) to: {RUN_OUTPUT_DIR}")
+    _log(f"[run] config: num_sequences={cfg.num_sequences} ep_len={cfg.ep_len} multistep={cfg.multistep} "
+         f"sampler_type={cfg.sampler_type} num_sampling_steps={cfg.num_sampling_steps} debug={cfg.debug}")
+
     seed_everything(0, workers=True)
 
     checkpoint = get_last_checkpoint(Path(cfg.train_folder))
@@ -183,6 +232,7 @@ def main(cfg):
         for r in RADII_TO_SWEEP
     ]
 
+    results = []
     total_gifs_saved = 0
     for label, obstacle_fn, radius in labels_and_obstacle_fns:
         sequence_results = []
@@ -197,24 +247,51 @@ def main(cfg):
 
         slots = build_fixed_cohort_slots(sequence_results, subtasks_per_sequence=5)
         violation_rate, success_rate = fixed_cohort_rates(slots)
-        print(f"[{label}] violation_rate={violation_rate:.3f}  success_rate={success_rate:.3f}"
-              f"  (avg_seq_len={success_rate * 5:.2f}/5, n_sequences={cfg.num_sequences})")
+        _log(f"[{label}] violation_rate={violation_rate:.3f}  success_rate={success_rate:.3f}"
+             f"  (avg_seq_len={success_rate * 5:.2f}/5, n_sequences={cfg.num_sequences})")
+
+        entry = {
+            "label": label,
+            "radius": radius,
+            "violation_rate": violation_rate,
+            "success_rate": success_rate,
+            "avg_seq_len": success_rate * 5,
+            "n_sequences": cfg.num_sequences,
+            "clearance_stats": None,
+            "gif_paths": None,
+            "gif_skip_reason": None,
+        }
+
         if cfg.debug:
-            _print_clearance_debug(label, sequence_results)
+            clearance_stats = _clearance_stats(sequence_results)
+            entry["clearance_stats"] = clearance_stats
+            _log_clearance_debug(label, clearance_stats)
             if obstacle_fn is not None:
                 vis_idx = _find_first_violating_sequence_idx(sequence_results)
                 if vis_idx is None:
-                    print(f"  [debug] {label}: no sequence violated at this radius -- "
-                          f"radius is likely too small to show anything at this checkpoint's "
-                          f"paths; skipping GIF for this radius")
+                    reason = ("no sequence violated at this radius -- radius is likely too small "
+                              "to show anything at this checkpoint's paths; skipping GIF")
+                    _log(f"  [debug] {label}: {reason}")
+                    entry["gif_skip_reason"] = reason
                 else:
-                    total_gifs_saved += _save_debug_gifs(
+                    gif_paths = _save_debug_gifs(
                         vis_idx, radius, obstacle_fn, env, policy, task_oracle, lang_embeddings, val_annotations,
                         get_env_state_for_initial_condition, cfg, eval_sequences, SEQUENCE_SEED_BASE,
                     )
+                    total_gifs_saved += len(gif_paths)
+                    entry["gif_paths"] = gif_paths
+
+        results.append(entry)
 
     if cfg.debug and total_gifs_saved > 0:
-        print(f"[debug] saved {total_gifs_saved} obstacle-visualization GIF(s) to: {VIS_OUTPUT_DIR}")
+        _log(f"[debug] saved {total_gifs_saved} obstacle-visualization GIF(s) under: {VIS_OUTPUT_DIR}")
+
+    results_path = RUN_OUTPUT_DIR / "results.json"
+    with open(results_path, "w", encoding="utf-8") as f:
+        json.dump({"radii_to_sweep": RADII_TO_SWEEP, "results": results}, f, indent=2)
+    _log(f"[run] wrote structured results to: {results_path}")
+    _log(f"[run] DONE -- zip up {RUN_OUTPUT_DIR} and send it back for tuning analysis")
+    _LOG_FILE.close()
 
 
 if __name__ == "__main__":
