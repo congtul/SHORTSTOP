@@ -22,6 +22,7 @@ written in:
 import sys
 from pathlib import Path
 
+import calvin_env  # noqa: F401 -- import BEFORE the sys.path.insert below, see comment there
 import hydra
 import numpy as np
 from pytorch_lightning import seed_everything
@@ -29,6 +30,21 @@ from pytorch_lightning import seed_everything
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MDT_POLICY_ROOT = REPO_ROOT / "mdt_policy"
 sys.path.insert(0, str(REPO_ROOT))
+# Importing `calvin_env` above, before this insert, matters: mdt_policy/
+# calvin_env/ (the submodule's own repo root, no __init__.py) sits *inside*
+# MDT_POLICY_ROOT and is itself named "calvin_env" -- once MDT_POLICY_ROOT
+# is on sys.path, `import calvin_env` from anywhere (including deep inside
+# calvin_env.envs.play_table_env's own internal imports) can resolve to
+# that directory as an implicit PEP 420 namespace package instead of the
+# real pip-installed `calvin_env` package (mdt_policy/calvin_env/calvin_env/,
+# installed via `pip install -e .` per docs/CALVIN_SETUP.md) -- a namespace
+# package's __file__ is None, which is exactly the
+# `TypeError: expected str, bytes or os.PathLike object, not NoneType`
+# crash in PlayTableSimEnv.__init__'s `Path(calvin_env.__file__)` call.
+# Importing it first caches the correctly-resolved module in sys.modules
+# before MDT_POLICY_ROOT ever shadows it -- same fix already in place in
+# scripts/run_calvin_unshielded.py, which is why that script doesn't hit
+# this but this one did until this import was added.
 sys.path.insert(0, str(MDT_POLICY_ROOT))
 
 from mdt.evaluation.multistep_sequences import get_sequences  # noqa: E402
