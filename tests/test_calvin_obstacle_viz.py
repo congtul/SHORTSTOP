@@ -1,6 +1,6 @@
 import numpy as np
 
-from shortstop.calvin_obstacle_viz import save_sequence_video
+from shortstop.calvin_obstacle_viz import _overlay_obstacle, _to_world_frame, save_sequence_video
 from shortstop.env import Obstacle
 
 
@@ -42,6 +42,38 @@ class _FakeCamera:
 def _fake_frames(n_steps, height=32, width=32):
     rng = np.random.default_rng(0)
     return [rng.integers(0, 255, size=(height, width, 3), dtype=np.uint8) for _ in range(n_steps)]
+
+
+def test_to_world_frame_applies_translation_and_rotation():
+    # identity orientation: pure translation.
+    world = _to_world_frame([1.0, 2.0, 3.0], base_position=[-0.34, -0.46, 0.24], base_orientation=[0.0, 0.0, 0.0, 1.0])
+    assert np.allclose(world, [0.66, 1.54, 3.24])
+
+    # 90-degree yaw (matches basic_playtable.yaml's robot_base_orientation
+    # convention): local +x should end up along world +y.
+    quarter_turn_z = [0.0, 0.0, np.sin(np.pi / 4), np.cos(np.pi / 4)]
+    world = _to_world_frame([1.0, 0.0, 0.0], base_position=[0.0, 0.0, 0.0], base_orientation=quarter_turn_z)
+    assert np.allclose(world, [0.0, 1.0, 0.0], atol=1e-9)
+
+
+def test_overlay_obstacle_moves_when_base_offset_is_supplied():
+    """Root-cause regression test: sample_obstacle_from_reference_chunk's
+    obstacle.center is in the robot's local base frame (see
+    shortstop.calvin_obstacle's docstring), not world coordinates -- a
+    real CALVIN scene's robot base sits away from the world origin (e.g.
+    calvin_scene_D.yaml's [-0.34, -0.46, 0.24]), so ignoring the offset
+    projects the obstacle to the wrong pixel entirely. Drawing with vs.
+    without the offset from the same local-frame obstacle must land on
+    different pixels."""
+    camera = _FakeCamera()
+    frame = _fake_frames(1)[0]
+    obstacle = Obstacle(center=[0.0, 0.0, 0.0], radius=0.05)
+
+    without_offset = np.asarray(_overlay_obstacle(frame, obstacle, camera))
+    with_offset = np.asarray(_overlay_obstacle(
+        frame, obstacle, camera, base_position=[0.3, 0.15, 0.6], base_orientation=[0.0, 0.0, 0.0, 1.0],
+    ))
+    assert not np.array_equal(without_offset, with_offset)
 
 
 def test_save_sequence_video_writes_a_nonempty_file_with_and_without_obstacle(tmp_path):

@@ -48,18 +48,51 @@ def _import_image_sequence_clip():
     return ImageSequenceClip
 
 
-def _overlay_obstacle(frame, obstacle, camera):
+def _quaternion_to_rotation_matrix(quaternion):
+    """pybullet's xyzw quaternion convention -> 3x3 rotation matrix, pure
+    numpy (no pybullet import needed -- just the 4 components as plain
+    floats, e.g. straight from robot.base_orientation)."""
+    x, y, z, w = quaternion
+    return np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ])
+
+
+def _to_world_frame(local_point, base_position, base_orientation):
+    """calvin_obstacle.sample_obstacle_from_reference_chunk's obstacle.
+    center is deliberately expressed in the robot's own *local* base
+    frame (see that module's docstring: the safety math never needs the
+    base-to-world transform, since both the obstacle and the real
+    per-step joint angles live in that same local frame). But CALVIN's
+    robot base does NOT sit at the world origin (e.g.
+    calvin_env/conf/scene/calvin_scene_D.yaml's robot_base_position =
+    [-0.34, -0.46, 0.24]), and the camera's viewMatrix is built in true
+    world coordinates -- so only this visualization needs to leave the
+    local frame, via the same base_position/base_orientation
+    (robot.base_position/robot.base_orientation, the latter already a
+    quaternion) PyBullet placed the robot's URDF at."""
+    rotation = _quaternion_to_rotation_matrix(base_orientation)
+    return np.asarray(base_position) + rotation @ np.asarray(local_point)
+
+
+def _overlay_obstacle(frame, obstacle, camera, base_position=(0.0, 0.0, 0.0), base_orientation=(0.0, 0.0, 0.0, 1.0)):
     """`frame`: HxWx3 uint8 array (one rgb_static frame). `camera`: the
     calvin_env StaticCamera object that rendered it (read-only here --
     its .viewMatrix/.projectionMatrix/.fov/.height, never mutated).
-    Returns a new PIL Image with the obstacle drawn as a red circle, or
-    an unmodified copy if `obstacle` is None or projects behind the
-    camera (nothing sane to draw)."""
+    `base_position`/`base_orientation`: the robot's base pose in world
+    coordinates (see _to_world_frame) -- default is the identity
+    transform (local frame == world frame), for callers/tests that don't
+    care about the offset. Returns a new PIL Image with the obstacle
+    drawn as a red circle, or an unmodified copy if `obstacle` is None or
+    projects behind the camera (nothing sane to draw)."""
     image = Image.fromarray(frame).convert("RGB")
     if obstacle is None:
         return image
 
-    projected = project_point(obstacle.center, camera.viewMatrix, camera.projectionMatrix, camera.width, camera.height)
+    world_center = _to_world_frame(obstacle.center, base_position, base_orientation)
+    projected = project_point(world_center, camera.viewMatrix, camera.projectionMatrix, camera.width, camera.height)
     if projected is None:
         return image
 
@@ -72,7 +105,10 @@ def _overlay_obstacle(frame, obstacle, camera):
     return image
 
 
-def save_sequence_video(subtask_records, camera, out_path, fps=10, freeze_frames=5):
+def save_sequence_video(
+    subtask_records, camera, out_path, fps=10, freeze_frames=5,
+    base_position=(0.0, 0.0, 0.0), base_orientation=(0.0, 0.0, 0.0, 1.0),
+):
     """Merge every subtask attempt of one sequence into a single MP4,
     each frame the real rgb_static camera image with that subtask's
     obstacle (if any) composited on top -- matches how the real CALVIN
@@ -88,6 +124,12 @@ def save_sequence_video(subtask_records, camera, out_path, fps=10, freeze_frames
     that rendered every one of these frames (the same viewMatrix/
     projectionMatrix must have produced all of them, or the overlay
     would be projected against the wrong camera pose).
+
+    `base_position`/`base_orientation`: the robot's base pose in world
+    coordinates (env.env.robot.base_position/.base_orientation) -- every
+    `obstacle.center` is expressed in that base's own local frame (see
+    _to_world_frame), so this must match the same env instance that
+    produced `subtask_records`, or the overlay lands in the wrong place.
 
     `freeze_frames`: how many times to repeat a subtask's final
     (overlaid) frame before moving on to the next subtask -- mirrors
@@ -105,7 +147,7 @@ def save_sequence_video(subtask_records, camera, out_path, fps=10, freeze_frames
     frames = []
     for record in subtask_records:
         for raw_frame in record["frames"]:
-            overlaid = _overlay_obstacle(raw_frame, record["obstacle"], camera)
+            overlaid = _overlay_obstacle(raw_frame, record["obstacle"], camera, base_position, base_orientation)
             frames.append(np.asarray(overlaid))
         frames.extend([frames[-1]] * freeze_frames)
 

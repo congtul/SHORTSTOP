@@ -124,7 +124,9 @@ def run_calvin_unshielded_subtask(
     None}, plus (only when `record_trajectory=True`) 'trajectory' (list of
     (9, 3) panda_frames() arrays -- the whole chain, base through flange,
     not a coarser named subset of it -- one per step incl. the starting
-    pose) and 'obstacle' (the Obstacle actually used, or None), plus
+    pose), plus (when `record_trajectory=True` OR `record_camera_frames=True`)
+    'obstacle' (the Obstacle actually used, or None -- needed by either
+    recording's own visualization, see shortstop.calvin_obstacle_viz), plus
     (only when `record_camera_frames=True`) 'camera_frames' (list of
     HxWx3 uint8 rgb_static arrays, one per step incl. the starting pose
     -- the SAME camera image the policy itself conditions on, fetched via
@@ -202,6 +204,7 @@ def run_calvin_unshielded_subtask(
     result = {"violated": violated, "reached": reached, "min_clearance": min_clearance}
     if record_trajectory:
         result["trajectory"] = trajectory
+    if record_trajectory or record_camera_frames:
         result["obstacle"] = obstacle
     if record_camera_frames:
         result["camera_frames"] = camera_frames
