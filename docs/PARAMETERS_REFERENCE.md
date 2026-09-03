@@ -1,0 +1,188 @@
+# Tunable Parameters Reference — baselines & ShortStop
+
+Mục tiêu file này: với mỗi tham số có thể tune trong repo — **nó là gì**, và **cần nhìn vào output/metric nào để biết nên tăng hay giảm**, cho đúng với env thực tế (CALVIN/arm) đang chạy. Giá trị trong paper (Table VII, xem `docs/REPRODUCING_TABLES_II_VI.md`) chỉ là 1 điểm khởi đầu người ta từng đề xuất cho setup của họ — **không phải chuẩn phải đạt tới**, không dùng để so sánh "đúng/sai". Mọi giá trị mặc định trong code hiện tại đều là điểm khởi đầu để tune tiếp, không phải kết luận.
+
+7 metric chính (`shortstop/metrics.py::aggregate`, `shortstop/calvin_metrics.py`) dùng làm tín hiệu tune xuyên suốt file này: `violation_rate`, `success_rate`, `shield_activation_rate`, `intervention_precision`, `latency_ms_*`, `conservatism_cost`, `recovery_rate`.
+
+---
+
+## 1. Khái niệm & cách tune (đọc phần này trước)
+
+Mỗi tham số dưới đây dùng chung ở nhiều class (2D lẫn arm/CALVIN) — giải thích 1 lần, mục 2 trở đi chỉ tra "class nào dùng, default hiện tại bao nhiêu".
+
+### K — số candidate chunk mỗi bước (`n_candidates`)
+- **Ý nghĩa**: Propose sinh ra K chunk, shield chọn 1 trong số đó (best-of-K).
+- **Output cần theo dõi**: `shield_activation_rate` (bao nhiêu % bước không tìm được candidate nào an toàn → fallback/braking) và `success_rate`.
+- **K quá nhỏ**: dễ rơi vào "0 candidate an toàn" → fallback nhiều → `success_rate` giảm dù không phải vì nguy hiểm mà vì không đủ lựa chọn. Dấu hiệu: `shield_activation_rate` cao nhưng `violation_rate` đã thấp sẵn.
+- **K quá lớn**: tốn compute (mỗi candidate phải propagate reachtube riêng) → `latency_ms_mean` tăng tuyến tính theo K, trong khi `success_rate` sớm bão hoà (plateau).
+- **Cách tune**: sweep K, vẽ `success_rate` (hoặc `shield_activation_rate`) theo K — dừng ở điểm đường cong bắt đầu phẳng, không cần K lớn hơn nữa.
+
+### H — horizon chứng nhận (certified horizon / `horizon`)
+- **Ý nghĩa**: Reachtube chỉ propagate và certify H bước đầu của chunk (chunk có thể dài hơn).
+- **Output cần theo dõi**: `violation_rate` (H quá ngắn: bỏ sót nguy hiểm nằm sau bước H) và `conservatism_cost`/`shield_activation_rate` (H quá dài: box nhiễu cộng dồn qua nhiều bước → tube phình to → candidate hợp lệ bị từ chối oan).
+- **Cách tune**: sweep H, tìm điểm `violation_rate` đã đủ thấp (không giảm thêm khi tăng H nữa) nhưng `conservatism_cost` chưa tăng mạnh.
+
+### w_bar — bound nhiễu shield certify chống lại (`w_bar`, khác với nhiễu thật của env)
+- **Ý nghĩa**: Reachtube giả định nhiễu mỗi bước nằm trong `[-w_bar, w_bar]`. Đây là giá trị shield *tin*, không nhất thiết bằng nhiễu *thật*.
+- **Output cần theo dõi**: `violation_rate` (đo trên rollout thật) là tín hiệu chính.
+- **w_bar bị đặt quá nhỏ so với nhiễu thật**: `violation_rate` > 0 dù shield "tưởng" đã certify an toàn — đây là dấu hiệu rõ ràng nhất cần tăng `w_bar`.
+- **w_bar quá lớn**: `shield_activation_rate`/`conservatism_cost` tăng, `success_rate` giảm mà `violation_rate` không giảm thêm được nữa (đã ở mức sàn).
+- **Cách tune đúng bài** (không dùng giá trị thật đặc quyền): `shortstop/calibration.py::calibrate_w_bar` — chạy rollout thật, đo residual `||x_{t+1} - f_hat(x_t, a_t)||`, lấy quantile cao (mặc định 0.99) nhân safety_factor (mặc định 1.25). Nếu sau khi certify theo giá trị này `violation_rate` vẫn > 0 đáng kể, tăng quantile hoặc safety_factor rồi đo lại; nếu `violation_rate` đã bằng 0 nhưng `success_rate` tệ hơn hẳn baseline, thử giảm.
+
+### model_error — sai số mô hình động lực học ($\hat f$ vs $f$ thật)
+- **Ý nghĩa**: Cộng thêm vào bán kính inflate của reachtube, bù cho việc $\hat f$ (mô hình shield dùng để propagate) không khớp 100% động lực thật.
+- **2D prototype**: `model_error=0.0` là **chính xác**, không phải xấp xỉ — vì $\hat f$ ở đó bằng đúng $f$ thật (`reach.propagate` docstring). Không cần tune ở 2D.
+- **Arm/CALVIN**: `model_error` khác 0 vì phép biến đổi task-space→joint-space qua Jacobian pseudo-inverse chỉ chính xác cục bộ (linearize quanh 1 điểm) — luôn có sai số thật, không tránh được.
+- **Output cần theo dõi**: giống `w_bar` — `violation_rate` > 0 dù shield chấp nhận chunk ⇒ tăng `model_error`. Cách đo cụ thể cho arm: log lại `||sphere_centers(q_thật) - sphere_centers(q_ước_lượng_từ_Jacobian)||` trên rollout thật, lấy quantile cao — chưa có script nào làm việc này, cần viết thêm (xem mục 7).
+
+### epsilon — biên an toàn STL ($\rho \geq \varepsilon$)
+- **Ý nghĩa**: Không chỉ chặn "chạm biên obstacle" (robustness = 0) mà đòi hỏi cách biên ít nhất `epsilon`.
+- **Output cần theo dõi**: `violation_rate` và `success_rate`/`conservatism_cost` cùng lúc — đây là 1 tham số đánh đổi kinh điển (Pareto).
+- **epsilon quá nhỏ**: candidate được chấp nhận sát biên obstacle → mọi sai số hình học/xấp xỉ (Jacobian, box thay vì hình dạng thật, ...) dễ biến "vừa đủ an toàn theo shield" thành "va chạm thật" → `violation_rate` nhích lên.
+- **epsilon quá lớn**: nhiều candidate hợp lệ bị từ chối dù thực ra an toàn → `shield_activation_rate` tăng, `success_rate`/`conservatism_cost` xấu đi.
+- **Cách tune**: sweep epsilon, vẽ `violation_rate` vs `success_rate` — chọn điểm "khuỷu tay" (knee) của đường cong, hoặc điểm `violation_rate` vừa chạm mức chấp nhận được cho ứng dụng của bạn.
+
+### trust_region ($\delta$) & step_size ($\eta$) — Repair (Eq. 4)
+- **Ý nghĩa**: `step_size` là độ dài 1 bước gradient đẩy candidate ra khỏi obstacle; `trust_region` là biên tối đa cho phép candidate đã sửa lệch khỏi bản gốc.
+- **Output cần theo dõi**: `recovery_rate` (repair có thành công certify lại không) song song với `success_rate`/`conservatism_cost` (candidate sửa xong còn "hữu ích" không, hay đã lệch quá xa mục tiêu ban đầu).
+- **step_size/trust_region quá nhỏ**: 1 bước (với `max_repair_iters=1`) không đủ để thoát vùng vi phạm → `recovery_rate` thấp, nhiều candidate rơi vào fallback → `success_rate` giảm.
+- **trust_region quá lớn**: candidate sau khi sửa có thể lệch rất xa ý định ban đầu (với arm: có thể phá vỡ giới hạn khớp thật, dù code hiện chưa check joint limit) — không có metric hiện tại bắt trực tiếp "lệch xa mục tiêu", phải tự quan sát qua log quỹ đạo hoặc thêm 1 signal đo khoảng cách tới candidate gốc.
+- **Cách tune**: sweep `step_size` trước (giữ `trust_region` đủ rộng để không giới hạn), tìm điểm `recovery_rate` bắt đầu bão hoà; sau đó thu hẹp `trust_region` dần tới khi `recovery_rate` bắt đầu giảm rõ rệt — đó là biên hẹp nhất còn chấp nhận được.
+
+### max_repair_iters — số vòng lặp CEGIS-style
+- **Ý nghĩa**: `=1` đúng Algorithm 1 gốc (1 bước, không retry). `>1` là mở rộng ngoài paper (lặp counterexample-search→repair tới khi hết vi phạm hoặc hết số vòng).
+- **Output cần theo dõi**: `recovery_rate` (tăng theo iters, nhưng bão hoà) so với `latency_ms_p95`/`latency_ms_mean` (KHÔNG dùng median — xem caveat trong `arm_shield.py`/`shield.py`: activation rate thấp có thể làm median "ẩn" mất nhánh chậm).
+- **Cách tune**: tăng dần từ 1, dừng khi `recovery_rate` không cải thiện thêm đáng kể so với chi phí latency tăng thêm.
+
+### disagreement_threshold (Conf-Thresh baseline)
+- **Ý nghĩa**: Ngưỡng "độ lệch giữa các candidate" để coi là không đáng tin.
+- **Output cần theo dõi**: `intervention_precision` — đo được: sweep 0.5→0.06 trên `GaussianChunkPolicy` cho `violation_rate` phẳng ~0.81 ở MỌI ngưỡng, tức proxy này không mang tín hiệu gì cho policy tổng hợp hiện tại. **Trước khi tốn công sweep tiếp trên CALVIN/policy thật**, kiểm tra `intervention_precision` có nhích lên theo threshold không — nếu vẫn phẳng, đừng đầu tư thêm vào baseline này, ghi nhận đó là kết quả thật (giống paper cũng chỉ báo 0.43 precision — yếu, không phải 0).
+
+### alpha (CBF-Shield gain)
+- **Ý nghĩa**: Class-$\mathcal{K}$ gain trong điều kiện đạo hàm CBF — alpha lớn cho phép giá trị barrier giảm nhanh hơn trước khi can thiệp (can thiệp trễ/gần biên hơn); alpha nhỏ can thiệp sớm/xa biên hơn.
+- **Output cần theo dõi**: `violation_rate` (alpha quá lớn: can thiệp trễ so với tốc độ hệ rời rạc hoá thật → dễ vọt qua biên giữa 2 bước) vs `success_rate`/`conservatism_cost` (alpha quá nhỏ: can thiệp quá sớm/thường xuyên).
+- **Cách tune**: sweep alpha, vẽ `violation_rate` vs `success_rate`, chọn điểm cân bằng.
+
+### max_action_norm — giới hạn biên độ hành động
+- Đây **không phải tham số nên tune theo metric** — phải khớp giới hạn vật lý thật của actuator/robot (2D: giả định abstract; arm thật: giới hạn tốc độ khớp/EE thật). Đặt sai (nhỏ hơn khả năng thật) sẽ làm mọi shield trông "tệ hơn" một cách giả tạo vì tự giới hạn hành động không liên quan gì đến an toàn.
+
+### MDT sampler config (`sampler_type`, `num_sampling_steps`, `sigma_min/max`, `noise_scheduler`)
+- **Ý nghĩa**: Chất lượng vs tốc độ của bước denoise diffusion — không phải tham số của ShortStop, mà của chính policy MDT (ảnh hưởng cả unshielded lẫn shielded).
+- **Output cần theo dõi**: chạy **không obstacle** trước, xem `success_rate` (chất lượng chunk thô, độc lập với shield) và latency của riêng bước `forward()`.
+- **num_sampling_steps quá nhỏ**: chunk kém chất lượng hơn → có thể vừa giảm `success_rate` vừa tăng `violation_rate` cùng lúc (không phải đánh đổi, mà xấu cả 2 phía) — đây là dấu hiệu rõ ràng cần tăng, không phải tune như 1 tradeoff thật.
+- **Cách tune**: sweep `num_sampling_steps` khi CHƯA có obstacle, tìm điểm `success_rate` bão hoà (không cần bước cao hơn nữa) — số này lấy từ chính checkpoint MDT, không liên quan gì đến ShortStop.
+
+### multistep / replan_steps — số bước thực thi trước khi propose lại
+- **Ý nghĩa**: Chunk dài hơn `replan_steps` chỉ thực thi `replan_steps` bước đầu rồi propose lại (nhưng reachtube certify cả H bước — xem tương tác với H ở trên).
+- **Output cần theo dõi**: `violation_rate` (replan thưa: nguy hiểm phát sinh giữa chunk không được phát hiện tới lần propose sau) vs `latency_ms_mean`×tần suất gọi (replan dày: gọi policy/shield nhiều hơn, tốn hơn).
+- **Cách tune**: sweep cùng lúc với H (2 tham số liên quan chặt) — `replan_steps <= H` là ràng buộc hợp lý (không thực thi vượt quá phần đã certify).
+
+### radius — obstacle ảo $X_u$ trên CALVIN (`shortstop/calvin_obstacle.py`)
+- **Ý nghĩa**: Tham số riêng của CALVIN (không có trong paper) — độ "khó" của bài toán an toàn tổng hợp mình tự tạo ra.
+- **Output cần theo dõi**: `violation_rate` của baseline **unshielded** (chưa có shield) khi bật obstacle.
+- **radius quá nhỏ**: obstacle gần như không bao giờ bị chạm → `violation_rate` (unshielded, with obstacle) gần 0 → không có gì để shield chứng minh cải thiện (floor effect, vô nghĩa).
+- **radius quá lớn**: gần như chunk nào cũng chạm → `violation_rate` gần 100% → cũng vô nghĩa (ceiling effect), và không còn phản ánh "obstacle đặt trên đường đi thật" nữa mà đơn giản là chặn hết.
+- **Cách tune**: sweep radius, mục tiêu tìm khoảng `violation_rate` (unshielded) vừa đủ cao để có "chỗ" cho shield cải thiện rõ rệt (ví dụ 30–70%, không có con số chuẩn — tự quyết theo câu chuyện muốn kể trong paper) nhưng không sát 0% hay 100%.
+- **Đã implement**: `scripts/run_calvin_unshielded.py::RADII_TO_SWEEP` (mặc định `[0.02, 0.05, 0.08, 0.12]`, sửa tay list này khi cần thử giá trị khác) chạy baseline unshielded với từng radius, in `violation_rate`/`success_rate` mỗi giá trị. Khi `cfg.debug=True` (mặc định hiện tại), in thêm thống kê `min_clearance` (mean/median/p10/p90/min/max) trên toàn bộ subtask đã thử — tín hiệu tinh hơn nhị phân violated/not-violated: nếu p10 luôn dương xa 0 dù radius đã lớn -> floor effect thật sự, còn nếu median rất âm -> ceiling effect.
+
+### num_sequences / n_episodes — cỡ mẫu
+- **Không phải tham số đánh đổi chất lượng** — chỉ ảnh hưởng độ tin cậy thống kê của các metric đo được.
+- **Output cần theo dõi**: độ rộng của confidence interval (paper's own recipe: bootstrap 10^4 resamples) hoặc đơn giản là chạy lại với seed khác, xem các metric có dao động nhiều không.
+- **Cách tune**: tăng tới khi metric ổn định giữa các lần chạy lặp lại (không đổi seed vẫn ra số gần giống nhau).
+
+### Sphere radii / DH table (`shortstop/robot_geometry.py`) — KHÔNG tune theo metric
+- Khác hẳn mọi tham số trên: đây là **hình học vật lý**, phải khớp robot thật (đo từ mesh CAD/URDF), không phải thứ "tune cho ra metric đẹp". Nếu tune sai theo hướng "đặt sphere radii nhỏ lại để success_rate cao hơn", số liệu sẽ đẹp nhưng vô nghĩa (an toàn giả). Chỉ sửa khi có số đo thật từ `franka_description`/mesh CAD.
+
+---
+
+## 2. Tra cứu nhanh — 2D env/episode-level (`shortstop/env.py`, `shortstop/experiment.py`)
+
+| Param | Default | Khái niệm ở mục 1 |
+|---|---|---|
+| `dt` | 0.1 | — (bước rời rạc hoá, không phải tham số tune theo metric, chỉ cần đủ nhỏ so với động lực thật) |
+| `w_bar` (thật, sinh nhiễu env) | 0.02 | privileged ground-truth, không phải cái để tune |
+| `shield_w_bar` (certify) | `None` → dùng `w_bar` | **w_bar** ở mục 1 |
+| `horizon` | 8 | **H** |
+| `n_candidates` | 8 | **K** |
+| `max_steps` | 200 | giới hạn cứng, không tune |
+| `goal_radius` | 0.3 | định nghĩa "reached", không tune cho shield |
+| `max_action_norm` | 1.0 | **max_action_norm** |
+
+## 3. Tra cứu nhanh — ShortStop shield stages 2D (`shortstop/shield.py`)
+
+| Class | Param | Default |
+|---|---|---|
+| ReachOnlyShield (Stage 1) | `w_bar`, `model_error` | (mục 2) / 0.0 |
+| STLShield (Stage 2) | +`epsilon` | 0.05 |
+| CEShield (Stage 3) | (không thêm — chỉ thêm chẩn đoán) | — |
+| RepairShield (Stage 4) | +`trust_region`, `step_size`, `max_repair_iters`, `max_action_norm` | 0.3 / 0.05 / 1 / 1.0 |
+
+## 4. Tra cứu nhanh — Table II baselines (`shortstop/baselines.py`)
+
+| Baseline | Param | Default |
+|---|---|---|
+| Conf-Thresh | `disagreement_threshold` | 0.15 |
+| STL-Monitor | — (ngưỡng cố định 0, không có param riêng) | — |
+| MPC-Filter | `w_bar`, `max_action_norm` | (mục 2) / 1.0 |
+| CBF-Shield | `alpha`, `max_action_norm` | 1.0 / 1.0 |
+
+## 5. Tra cứu nhanh — Propose-step policies (`shortstop/policy.py`)
+
+| Policy | Param | Default |
+|---|---|---|
+| `GaussianChunkPolicy` | `horizon`, `n_candidates`, `noise_std`, `max_speed` | 8 / 8 / 0.3 / 1.0 |
+| `DiffusionChunkPolicy` | `n_candidates`, `num_inference_steps` | 8 / 10 |
+
+## 6. Tra cứu nhanh — Calibration recipe (`shortstop/calibration.py`)
+
+| Param | Default |
+|---|---|
+| `quantile` | 0.99 |
+| `safety_factor` | 1.25 |
+| `n_episodes` | 200 |
+
+## 7. Tra cứu nhanh — Arm/CALVIN shield stages (`shortstop/arm_shield.py`, Stage 7a/7b)
+
+| Class | Param | Default |
+|---|---|---|
+| ArmReachOnlyShield | `w_bar`, `model_error` | (truyền vào) / 0.02 |
+| ArmSTLShield | +`epsilon` | 0.02 |
+| ArmRepairShield | +`trust_region`, `step_size`, `max_repair_iters` | 0.05 / 0.02 / 1 |
+
+Chưa có script nào đo residual thật (Jacobian pseudo-inverse) để calibrate `model_error` kiểu `calibration.py` — nếu cần, phải viết thêm (rollout thật, so `sphere_centers` dự đoán vs đo được, lấy quantile).
+
+## 8. Tra cứu nhanh — Robot geometry constants (`shortstop/robot_geometry.py`)
+
+| Const | Giá trị | Ghi chú |
+|---|---|---|
+| `SPHERE_RADII` | `[0.08, 0.08, 0.08, 0.06]` m | placeholder, chưa đo mesh thật |
+| `SPHERE_FRAME_INDICES` | `[3, 5, 7, 8]` | elbow/forearm/wrist/gripper |
+| `PANDA_DH` | bảng modified-DH | chưa verify với URDF thật |
+
+## 9. Tra cứu nhanh — CALVIN/MDT policy sampling (`mdt_policy/conf/mdt_evaluate.yaml`, qua `patches/mdt_policy_shortstop.patch`)
+
+| Param | Default hiện tại |
+|---|---|
+| `sampler_type` | `ddim` |
+| `num_sampling_steps` | 10 |
+| `multistep` (= `replan_steps` phía harness) | 10 |
+| `sigma_min` / `sigma_max` | 1.0 / 80 |
+| `noise_scheduler` | `exponential` |
+| `cond_lambda`, `cfg_value` | 1 / 1 |
+| `ep_len` | 360 |
+| `num_sequences` | 100 (đổi từ gốc 1000 để chạy nhanh khi debug) |
+| `n_candidates` (K) | **1** trong `_ForwardOnlyPolicy` (`scripts/run_calvin_unshielded.py`) — hợp lý cho baseline unshielded hiện tại, cần tăng khi wiring shield thật |
+
+## 10. Tra cứu nhanh — CALVIN obstacle injection (`shortstop/calvin_obstacle.py`)
+
+| Param | Default |
+|---|---|
+| `radius` | 0.05 m |
+| `sphere_name` | `SPHERE_NAMES[-1]` = `"gripper"` |
+
+## 11. Tra cứu nhanh — CALVIN experiment harness (`scripts/run_calvin_unshielded.py`)
+
+| Param | Default |
+|---|---|
+| `SEQUENCE_SEED_BASE` | 1000 (reseed mỗi sequence, xem mục 1's ghi chú về RNG-alignment) |
+| `subtasks_per_sequence` (fixed-cohort denominator, `calvin_metrics.py`) | 5 — cố định theo convention CALVIN, không phải tham số nên đổi |

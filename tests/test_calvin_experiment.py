@@ -81,9 +81,9 @@ def test_unshielded_subtask_succeeds_when_never_flagged():
     env.reset()
     result = run_calvin_unshielded_subtask(
         env, FakePolicy(), FakeTaskOracle(success_after_steps=12), FakeLangEmbeddings(), SUBTASK, VAL_ANNOTATIONS,
-        ep_len=360, replan_steps=10, obstacle=None,
+        ep_len=360, replan_steps=10, obstacle_fn=None,
     )
-    assert result == {"violated": False, "reached": True}
+    assert result == {"violated": False, "reached": True, "min_clearance": None}
 
 
 def test_unshielded_subtask_stops_at_violation_and_never_reaches():
@@ -97,10 +97,11 @@ def test_unshielded_subtask_stops_at_violation_and_never_reaches():
 
     result = run_calvin_unshielded_subtask(
         env, FakePolicy(), FakeTaskOracle(success_after_steps=12), FakeLangEmbeddings(), SUBTASK, VAL_ANNOTATIONS,
-        ep_len=360, replan_steps=10, obstacle=obstacle,
+        ep_len=360, replan_steps=10, obstacle_fn=lambda joint_angles, chunk: obstacle,
     )
     assert result["violated"] is True
     assert result["reached"] is False  # violated => never gets a chance to also succeed
+    assert result["min_clearance"] <= 0.0  # violated => clearance hit zero/negative
 
 
 def test_violation_rate_and_success_rate_differ_with_vs_without_obstacle():

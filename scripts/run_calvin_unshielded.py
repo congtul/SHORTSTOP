@@ -1,5 +1,12 @@
 """Unshielded baseline: violation_rate/success_rate with vs. without the
-privileged obstacle, over `cfg.num_sequences` CALVIN sequences.
+privileged obstacle, over `cfg.num_sequences` CALVIN sequences -- swept
+over a handful of candidate obstacle radii (see RADII_TO_SWEEP below),
+since the radius itself is a free parameter with no paper reference (it
+is a synthetic X_u we invented for CALVIN, not something the paper
+specifies): too small and the obstacle is almost never hit (floor effect,
+nothing for a shield to demonstrate improvement on); too large and almost
+every attempt hits it (ceiling effect). See docs/PARAMETERS_REFERENCE.md
+muc 1's "radius" entry for the full reasoning.
 
 Run from WSL2, inside the `mdt_env` conda environment set up per
 docs/CALVIN_SETUP.md (needs a real GPU + the mdt_policy checkpoint +
@@ -17,6 +24,18 @@ shortstop.mdt_policy_client.MDTPolicyClient -- that class only calls
 sampler_type/num_sampling_steps/sigma/EMA-weight overrides the real eval
 script applies afterwards; use it only for structural/mocked testing
 (tests/test_mdt_policy_client.py), not for a real run.
+
+When `cfg.debug` (patched default: True -- see patches/mdt_policy_shortstop.patch;
+flip to False only when told to prep for release):
+  - prints min_clearance stats (mean/median/p10/p90/min over every
+    attempted subtask) per radius -- a finer-grained signal than the
+    binary violated/not-violated rate for judging whether a radius is in
+    a sane range before committing to it.
+  - re-runs sequence 0 alone (same per-sequence seed as the main sweep,
+    so it's the exact attempt those metrics/stats already reflect) once
+    per radius with trajectory recording on, and saves one GIF per
+    subtask attempt to VIS_OUTPUT_DIR (see shortstop/calvin_obstacle_viz.py) --
+    printed once at the end.
 """
 import sys
 from pathlib import Path
@@ -38,6 +57,68 @@ from mdt.utils.utils import get_last_checkpoint  # noqa: E402
 from shortstop.calvin_experiment import run_calvin_unshielded_sequence  # noqa: E402
 from shortstop.calvin_metrics import build_fixed_cohort_slots, fixed_cohort_rates  # noqa: E402
 from shortstop.calvin_obstacle import sample_obstacle_from_reference_chunk  # noqa: E402
+from shortstop.calvin_obstacle_viz import save_subtask_gif  # noqa: E402
+
+# Candidate obstacle radii to sweep (meters) -- edit this list directly
+# while tuning; no config knob for it yet since we're still narrowing the
+# range by hand, see module docstring.
+RADII_TO_SWEEP = [0.02, 0.05, 0.08, 0.12]
+
+VIS_OUTPUT_DIR = REPO_ROOT / "outputs" / "calvin_obstacle_viz"
+
+
+def _print_clearance_debug(label, sequence_results):
+    clearances = [
+        a["min_clearance"] for attempts in sequence_results for a in attempts
+        if a["min_clearance"] is not None
+    ]
+    if not clearances:
+        print(f"  [debug] {label}: no attempted subtasks had an obstacle to measure clearance against")
+        return
+    clearances = np.asarray(clearances)
+    print(
+        f"  [debug] {label}: min_clearance over {len(clearances)} attempted subtasks -- "
+        f"mean={clearances.mean():.4f}  median={np.median(clearances):.4f}  "
+        f"p10={np.percentile(clearances, 10):.4f}  p90={np.percentile(clearances, 90):.4f}  "
+        f"min={clearances.min():.4f}  max={clearances.max():.4f}"
+    )
+
+
+def _find_first_violating_sequence_idx(sequence_results):
+    """First sequence index with at least one violated attempt, or None if
+    this radius was never hit by any of the swept sequences at all -- the
+    latter is itself a useful debug signal (radius likely too small for
+    this checkpoint/task set), not just "nothing to visualize"."""
+    for idx, attempts in enumerate(sequence_results):
+        if any(a["violated"] for a in attempts):
+            return idx
+    return None
+
+
+def _save_debug_gifs(
+    sequence_idx, radius, obstacle_fn, env, policy, task_oracle, lang_embeddings, val_annotations,
+    get_env_state_for_initial_condition, cfg, eval_sequences, sequence_seed_base,
+):
+    """Re-runs sequence `sequence_idx` alone (same per-sequence seed the
+    main sweep already used for it -- reseeding is per-idx for *every*
+    sequence in that sweep, not just this one, so this reproduces exactly
+    the attempt that already contributed to the printed metrics/stats,
+    whichever idx is picked) with trajectory recording on, saves one GIF
+    per subtask attempt of that sequence to VIS_OUTPUT_DIR. Returns how
+    many GIFs were written."""
+    initial_state, eval_sequence = eval_sequences[sequence_idx]
+    seed_everything(sequence_seed_base + sequence_idx, workers=True)
+    attempts = run_calvin_unshielded_sequence(
+        env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
+        get_env_state_for_initial_condition, ep_len=cfg.ep_len, replan_steps=cfg.multistep,
+        obstacle_fn=obstacle_fn, record_trajectory=True,
+    )
+    VIS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    safe_radius = str(radius).replace(".", "p")
+    for i, attempt in enumerate(attempts):
+        out_path = VIS_OUTPUT_DIR / f"seq{sequence_idx}_subtask{i}_r{safe_radius}.gif"
+        save_subtask_gif(attempt["trajectory"], attempt["obstacle"], str(out_path))
+    return len(attempts)
 
 
 class _ForwardOnlyPolicy:
@@ -84,14 +165,29 @@ def main(cfg):
 
     eval_sequences = get_sequences(cfg.num_sequences)
 
-    for label, obstacle_fn in [
-        ("without obstacle", None),
-        ("with obstacle", lambda joint_angles, reference_chunk: sample_obstacle_from_reference_chunk(
-            joint_angles, reference_chunk, radius=0.05,
-        )),
-    ]:
+    # Reseeded identically per sequence index in *both* branches below (not
+    # just once at the top of main()) so that, for a given sequence, the
+    # "with obstacle" run draws the exact same diffusion-policy noise as
+    # the "without obstacle" run up to the point the obstacle is hit --
+    # otherwise the two branches are just two independent stochastic
+    # rollouts and "with <= without" would only hold statistically over
+    # many sequences, not per-sequence as the comparison is meant to show.
+    SEQUENCE_SEED_BASE = 1000
+
+    labels_and_obstacle_fns = [("without obstacle", None, None)] + [
+        (
+            f"with obstacle r={r}",
+            lambda joint_angles, chunk, r=r: sample_obstacle_from_reference_chunk(joint_angles, chunk, radius=r),
+            r,
+        )
+        for r in RADII_TO_SWEEP
+    ]
+
+    total_gifs_saved = 0
+    for label, obstacle_fn, radius in labels_and_obstacle_fns:
         sequence_results = []
-        for initial_state, eval_sequence in eval_sequences:
+        for idx, (initial_state, eval_sequence) in enumerate(eval_sequences):
+            seed_everything(SEQUENCE_SEED_BASE + idx, workers=True)
             attempts = run_calvin_unshielded_sequence(
                 env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
                 get_env_state_for_initial_condition, ep_len=cfg.ep_len, replan_steps=cfg.multistep,
@@ -103,6 +199,22 @@ def main(cfg):
         violation_rate, success_rate = fixed_cohort_rates(slots)
         print(f"[{label}] violation_rate={violation_rate:.3f}  success_rate={success_rate:.3f}"
               f"  (avg_seq_len={success_rate * 5:.2f}/5, n_sequences={cfg.num_sequences})")
+        if cfg.debug:
+            _print_clearance_debug(label, sequence_results)
+            if obstacle_fn is not None:
+                vis_idx = _find_first_violating_sequence_idx(sequence_results)
+                if vis_idx is None:
+                    print(f"  [debug] {label}: no sequence violated at this radius -- "
+                          f"radius is likely too small to show anything at this checkpoint's "
+                          f"paths; skipping GIF for this radius")
+                else:
+                    total_gifs_saved += _save_debug_gifs(
+                        vis_idx, radius, obstacle_fn, env, policy, task_oracle, lang_embeddings, val_annotations,
+                        get_env_state_for_initial_condition, cfg, eval_sequences, SEQUENCE_SEED_BASE,
+                    )
+
+    if cfg.debug and total_gifs_saved > 0:
+        print(f"[debug] saved {total_gifs_saved} obstacle-visualization GIF(s) to: {VIS_OUTPUT_DIR}")
 
 
 if __name__ == "__main__":

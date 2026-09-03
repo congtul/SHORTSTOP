@@ -47,12 +47,24 @@ def _to_action_tensor(action_row):
     return torch.as_tensor(np.asarray(action_row, dtype=np.float32))
 
 
-def _violates(obs, obstacle):
+def _clearance(obs, obstacle):
+    """min over spheres of (distance to obstacle center - radius) -- signed:
+    <= 0 means violated (a sphere is inside or touching the obstacle), > 0
+    is how far the closest sphere is from the boundary. `None` if there is
+    no obstacle at all (nothing to measure clearance against). Used both
+    for the violation check itself and (see calvin_experiment's callers)
+    as a radius-tuning diagnostic: the *distribution* of this value over
+    many attempts shows whether a given radius is too small (clearance
+    rarely near 0, floor effect) or too large (deeply negative on most
+    attempts, ceiling effect) well before looking at the binary
+    violated/not-violated rate alone.
+    """
     if obstacle is None:
-        return False
+        return None
     joint_angles = _joint_angles_from_obs(obs)
     centers = sphere_centers(joint_angles)
-    return bool(np.any(np.linalg.norm(centers - obstacle.center, axis=1) <= obstacle.radius))
+    distances = np.linalg.norm(centers - obstacle.center, axis=1)
+    return float(np.min(distances) - obstacle.radius)
 
 
 def _lang_goal(lang_embeddings, val_annotations, subtask):
@@ -67,36 +79,68 @@ def _lang_goal(lang_embeddings, val_annotations, subtask):
 
 def run_calvin_unshielded_subtask(
     env, policy, task_oracle, lang_embeddings, subtask, val_annotations,
-    ep_len=360, replan_steps=10, obstacle=None,
+    ep_len=360, replan_steps=10, obstacle_fn=None, record_trajectory=False,
 ):
     """One subtask attempt, unshielded: `policy.propose(...)`'s first
     candidate is executed directly, no filtering at all -- matches
     shortstop.experiment.run_episode's `else: first_action = candidates[0][0]`
     branch (no shield = execute the first candidate).
 
-    Returns {'violated': bool, 'reached': bool}. `obstacle`
-    (shortstop.env.Obstacle or None): if given, checked (ground truth,
-    from the real post-step robot_obs_raw) after every real env.step();
-    None runs the pure CALVIN-official baseline with no check at all.
+    Returns {'violated': bool, 'reached': bool, 'min_clearance': float or
+    None}, plus (only when `record_trajectory=True`) 'trajectory' (list of
+    (4, 3) sphere_centers() arrays, one per step incl. the starting pose --
+    see shortstop.calvin_obstacle_viz) and 'obstacle' (the Obstacle actually
+    used, or None). Recording is opt-in and off by default: it's only meant
+    for a single illustrative attempt at a time (debug visualization), not
+    every attempt of a large sweep -- the memory/list-building cost is not
+    worth paying when nobody is going to render it.
+
+    `min_clearance` is the smallest `_clearance()` value seen over every
+    step of this attempt (see its docstring) -- `None` when `obstacle_fn`
+    is None (nothing to measure). `obstacle_fn(joint_angles, chunk) ->
+    Obstacle`, or None to run the pure CALVIN-official baseline with no
+    check at all. Deliberately placed from the *first* proposed chunk of
+    this subtask -- the same chunk that actually gets executed, not a
+    separate speculative `propose()` call -- so an unshielded run with vs.
+    without an obstacle_fn issues the exact same number/order of
+    policy.propose() calls and (given the caller reseeds identically
+    before each sequence) follows the identical trajectory up to the
+    point the obstacle is hit. A separate reference-chunk call would burn
+    an extra draw of the diffusion policy's noise and desync the two
+    runs from step 1, defeating the whole point of the comparison.
     """
     obs = env.get_obs()
     goal = _lang_goal(lang_embeddings, val_annotations, subtask)
     start_info = env.get_info()
 
+    obstacle = None
     violated = False
     reached = False
+    min_clearance = None
     steps_taken = 0
+    first_chunk = True
+    trajectory = [sphere_centers(_joint_angles_from_obs(obs))] if record_trajectory else None
     while steps_taken < ep_len:
         candidates = policy.propose({**obs, "goal": goal})
         chunk = candidates[0]
+
+        if first_chunk and obstacle_fn is not None:
+            obstacle = obstacle_fn(_joint_angles_from_obs(obs), chunk)
+        first_chunk = False
 
         for action_row in chunk[:replan_steps]:
             obs, _, _, current_info = env.step(_to_action_tensor(action_row))
             steps_taken += 1
 
-            if _violates(obs, obstacle):
-                violated = True
-                break
+            if record_trajectory:
+                trajectory.append(sphere_centers(_joint_angles_from_obs(obs)))
+
+            clearance = _clearance(obs, obstacle)
+            if clearance is not None:
+                min_clearance = clearance if min_clearance is None else min(min_clearance, clearance)
+                if clearance <= 0:
+                    violated = True
+                    break
 
             current_task_info = task_oracle.get_task_info_for_set(start_info, current_info, {subtask})
             if len(current_task_info) > 0:
@@ -109,12 +153,17 @@ def run_calvin_unshielded_subtask(
         if violated or reached:
             break
 
-    return {"violated": violated, "reached": reached}
+    result = {"violated": violated, "reached": reached, "min_clearance": min_clearance}
+    if record_trajectory:
+        result["trajectory"] = trajectory
+        result["obstacle"] = obstacle
+    return result
 
 
 def run_calvin_unshielded_sequence(
     env, policy, task_oracle, lang_embeddings, initial_condition, eval_sequence, val_annotations,
     get_env_state_for_initial_condition, ep_len=360, replan_steps=10, obstacle_fn=None,
+    record_trajectory=False,
 ):
     """One full sequence attempt (up to `len(eval_sequence)` subtasks),
     stopping at the first failed/violated subtask -- mirrors CALVIN's own
@@ -122,8 +171,14 @@ def run_calvin_unshielded_sequence(
     shortstop/calvin_metrics.py's docstring for why this matters for fair
     cross-baseline comparison).
 
-    `obstacle_fn(joint_angles, reference_chunk) -> Obstacle`, or None to
-    run with no obstacle at all (the pure CALVIN-official baseline).
+    `obstacle_fn(joint_angles, chunk) -> Obstacle`, or None to run with no
+    obstacle at all (the pure CALVIN-official baseline) -- forwarded as-is
+    to run_calvin_unshielded_subtask for each subtask (see its docstring
+    for why the obstacle is derived from the actually-executed chunk
+    instead of a separate speculative propose() call). `record_trajectory`
+    likewise forwarded as-is to every subtask -- see that function's
+    docstring; only use this for a single sequence you intend to visualize
+    (shortstop.calvin_obstacle_viz), not a full metrics sweep.
     Returns a list of 0..len(eval_sequence) per-subtask {'violated',
     'reached'} dicts -- feed this (one list per launched sequence) into
     shortstop.calvin_metrics.build_fixed_cohort_slots.
@@ -133,16 +188,10 @@ def run_calvin_unshielded_sequence(
 
     attempts = []
     for subtask in eval_sequence:
-        obstacle = None
-        if obstacle_fn is not None:
-            obs = env.get_obs()
-            joint_angles = _joint_angles_from_obs(obs)
-            reference_chunk = policy.propose({**obs, "goal": _lang_goal(lang_embeddings, val_annotations, subtask)})[0]
-            obstacle = obstacle_fn(joint_angles, reference_chunk)
-
         result = run_calvin_unshielded_subtask(
             env, policy, task_oracle, lang_embeddings, subtask, val_annotations,
-            ep_len=ep_len, replan_steps=replan_steps, obstacle=obstacle,
+            ep_len=ep_len, replan_steps=replan_steps, obstacle_fn=obstacle_fn,
+            record_trajectory=record_trajectory,
         )
         attempts.append(result)
         if not result["reached"]:
