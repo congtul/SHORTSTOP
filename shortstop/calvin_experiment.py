@@ -55,6 +55,16 @@ def _violates(obs, obstacle):
     return bool(np.any(np.linalg.norm(centers - obstacle.center, axis=1) <= obstacle.radius))
 
 
+def _lang_goal(lang_embeddings, val_annotations, subtask):
+    """Builds the goal dict MDTVAgent.forward() needs: `get_lang_goal()`'s
+    own dict, plus the `lang_text` key forward() reads directly (not
+    returned by get_lang_goal() itself)."""
+    lang_annotation = val_annotations[subtask][0]
+    goal = lang_embeddings.get_lang_goal(lang_annotation)
+    goal["lang_text"] = lang_annotation
+    return goal
+
+
 def run_calvin_unshielded_subtask(
     env, policy, task_oracle, lang_embeddings, subtask, val_annotations,
     ep_len=360, replan_steps=10, obstacle=None,
@@ -70,9 +80,7 @@ def run_calvin_unshielded_subtask(
     None runs the pure CALVIN-official baseline with no check at all.
     """
     obs = env.get_obs()
-    lang_annotation = val_annotations[subtask][0]
-    goal = lang_embeddings.get_lang_goal(lang_annotation)
-    goal["lang_text"] = lang_annotation
+    goal = _lang_goal(lang_embeddings, val_annotations, subtask)
     start_info = env.get_info()
 
     violated = False
@@ -129,7 +137,7 @@ def run_calvin_unshielded_sequence(
         if obstacle_fn is not None:
             obs = env.get_obs()
             joint_angles = _joint_angles_from_obs(obs)
-            reference_chunk = policy.propose({**obs, "goal": lang_embeddings.get_lang_goal(val_annotations[subtask][0])})[0]
+            reference_chunk = policy.propose({**obs, "goal": _lang_goal(lang_embeddings, val_annotations, subtask)})[0]
             obstacle = obstacle_fn(joint_angles, reference_chunk)
 
         result = run_calvin_unshielded_subtask(

@@ -21,6 +21,7 @@ script applies afterwards; use it only for structural/mocked testing
 import sys
 from pathlib import Path
 
+import calvin_env
 import hydra
 import numpy as np
 from pytorch_lightning import seed_everything
