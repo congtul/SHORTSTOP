@@ -152,6 +152,7 @@ def main(cfg):
         subtask_records.append({
             "subtask": subtask,
             "frames": attempt["camera_frames"],
+            "depth_frames": attempt["depth_frames"],
             "obstacle": attempt["obstacle"],
             "outcome": outcome,
         })

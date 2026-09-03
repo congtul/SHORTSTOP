@@ -1,6 +1,8 @@
 import numpy as np
+from PIL import Image
 
 from shortstop.calvin_obstacle_viz import _overlay_obstacle, _to_world_frame, save_sequence_video
+from shortstop.camera_projection import project_point
 from shortstop.env import Obstacle
 
 
@@ -22,6 +24,7 @@ class _FakeCamera:
         right = np.cross(forward, up)
         right /= np.linalg.norm(right)
         true_up = np.cross(right, forward)
+        self.eye, self.forward, self.right, self.up = eye, forward, right, true_up
         view = np.eye(4)
         view[0, :3] = right
         view[1, :3] = true_up
@@ -74,6 +77,50 @@ def test_overlay_obstacle_moves_when_base_offset_is_supplied():
         frame, obstacle, camera, base_position=[0.3, 0.15, 0.6], base_orientation=[0.0, 0.0, 0.0, 1.0],
     ))
     assert not np.array_equal(without_offset, with_offset)
+
+
+def test_overlay_obstacle_hidden_when_real_depth_shows_occlusion():
+    """A privileged obstacle has no real presence in the scene -- if
+    depth_frame says something real is closer to the camera at that
+    exact pixel than the obstacle (e.g. the table), the marker must not
+    be drawn on top of it."""
+    camera = _FakeCamera()
+    frame = _fake_frames(1)[0]
+    obstacle = Obstacle(center=[0.0, 0.0, 0.0], radius=0.05)
+    baseline = np.asarray(Image.fromarray(frame).convert("RGB"))
+
+    pixel_x, pixel_y, depth = project_point(
+        obstacle.center, camera.viewMatrix, camera.projectionMatrix, camera.width, camera.height,
+    )
+
+    nothing_closer = np.full((camera.height, camera.width), depth + 10.0, dtype=np.float32)
+    visible = np.asarray(_overlay_obstacle(frame, obstacle, camera, depth_frame=nothing_closer))
+    assert not np.array_equal(visible, baseline)
+
+    something_closer = nothing_closer.copy()
+    something_closer[int(round(pixel_y)), int(round(pixel_x))] = depth - 1.0
+    hidden = np.asarray(_overlay_obstacle(frame, obstacle, camera, depth_frame=something_closer))
+    assert np.array_equal(hidden, baseline)
+
+
+def test_overlay_obstacle_draws_a_small_clamped_marker_when_projected_off_frame():
+    """A point in front of the camera but well outside the static
+    camera's narrow FOV must still show *something* (a small edge
+    marker), not silently vanish -- and must not become a huge ellipse
+    that floods the frame."""
+    camera = _FakeCamera()
+    frame = _fake_frames(1)[0]
+    baseline = np.asarray(Image.fromarray(frame).convert("RGB"))
+    far_off_to_the_side = camera.eye + camera.forward * 2.0 + camera.right * 50.0
+    obstacle = Obstacle(center=list(far_off_to_the_side), radius=0.05)
+
+    overlaid = np.asarray(_overlay_obstacle(frame, obstacle, camera))
+
+    assert not np.array_equal(overlaid, baseline)
+    red_pixel_count = int(np.sum(
+        (overlaid[:, :, 0].astype(int) > 200) & (overlaid[:, :, 1].astype(int) < 50) & (overlaid[:, :, 2].astype(int) < 50)
+    ))
+    assert 0 < red_pixel_count < 60  # a small clamped dot, not a frame-flooding ellipse
 
 
 def test_save_sequence_video_writes_a_nonempty_file_with_and_without_obstacle(tmp_path):

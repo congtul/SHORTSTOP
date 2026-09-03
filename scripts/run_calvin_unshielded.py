@@ -148,15 +148,20 @@ def _log_clearance_debug(label, stats):
     )
 
 
-def _find_first_violating_sequence_idx(sequence_results):
-    """First sequence index with at least one violated attempt, or None if
-    this radius was never hit by any of the swept sequences at all -- the
-    latter is itself a useful debug signal (radius likely too small for
-    this checkpoint/task set), not just "nothing to visualize"."""
-    for idx, attempts in enumerate(sequence_results):
-        if any(a["violated"] for a in attempts):
-            return idx
-    return None
+def _rank_violating_sequence_idxs_by_length(sequence_results, top_k):
+    """Sequence indices with at least one violated attempt, longest-
+    running (most subtasks attempted before stopping) first -- picks
+    videos for _save_debug_videos that are actually informative: a
+    sequence that reaches several subtasks before the obstacle finally
+    stops it shows far more than one that violates on subtask 1, which
+    is otherwise just luck of which sequence a fixed idx happened to be.
+    Returns up to `top_k` indices, fewer if fewer than `top_k` sequences
+    violated at all at this radius -- no fallback to non-violating
+    sequences pads the list out, since the whole point is showing the
+    obstacle actually doing something."""
+    violating = [idx for idx, attempts in enumerate(sequence_results) if any(a["violated"] for a in attempts)]
+    violating.sort(key=lambda idx: len(sequence_results[idx]), reverse=True)
+    return violating[:top_k]
 
 
 def _save_debug_videos(
@@ -194,13 +199,17 @@ def _save_debug_videos(
         subtask_records.append({
             "subtask": subtask,
             "frames": attempt["camera_frames"],
+            "depth_frames": attempt["depth_frames"],
             "obstacle": attempt["obstacle"],
             "outcome": outcome,
         })
 
     static_camera = next(cam for cam in env.env.cameras if cam.name == "static")
     out_path = VIS_OUTPUT_DIR / f"seq{sequence_idx}_r{safe_radius}.mp4"
-    save_sequence_video(subtask_records, static_camera, str(out_path))
+    save_sequence_video(
+        subtask_records, static_camera, str(out_path),
+        base_position=env.env.robot.base_position, base_orientation=env.env.robot.base_orientation,
+    )
     return [str(out_path.relative_to(RUN_OUTPUT_DIR))]
 
 
@@ -308,17 +317,19 @@ def main(cfg):
             entry["clearance_stats"] = clearance_stats
             _log_clearance_debug(label, clearance_stats)
             if obstacle_fn is not None:
-                vis_idx = _find_first_violating_sequence_idx(sequence_results)
-                if vis_idx is None:
+                vis_idxs = _rank_violating_sequence_idxs_by_length(sequence_results, cfg.num_videos)
+                if not vis_idxs:
                     reason = ("no sequence violated at this radius -- radius is likely too small "
                               "to show anything at this checkpoint's paths; skipping video")
                     _log(f"  [debug] {label}: {reason}")
                     entry["video_skip_reason"] = reason
                 else:
-                    video_paths = _save_debug_videos(
-                        vis_idx, radius, obstacle_fn, env, policy, task_oracle, lang_embeddings, val_annotations,
-                        get_env_state_for_initial_condition, cfg, eval_sequences, SEQUENCE_SEED_BASE,
-                    )
+                    video_paths = []
+                    for vis_idx in vis_idxs:
+                        video_paths += _save_debug_videos(
+                            vis_idx, radius, obstacle_fn, env, policy, task_oracle, lang_embeddings, val_annotations,
+                            get_env_state_for_initial_condition, cfg, eval_sequences, SEQUENCE_SEED_BASE,
+                        )
                     total_videos_saved += len(video_paths)
                     entry["video_paths"] = video_paths
 

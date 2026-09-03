@@ -100,6 +100,20 @@ def _clearance(obs, obstacle):
     return float(min(clearances))
 
 
+def _camera_frame(env):
+    """One (rgb_static, depth_static) pair from a single env.env.get_obs()
+    call -- calvin_env's own get_camera_obs() computes both from the same
+    p.getCameraImage() render, so fetching both here costs nothing extra
+    over the rgb-only version this used to be; depth_static is a real
+    per-pixel camera-space distance in meters (see calvin_env.camera.
+    camera.Camera.process_rgbd/z_buffer_to_real_distance), the same
+    convention as camera_projection.project_point's own `depth` return
+    value -- what makes shortstop.calvin_obstacle_viz's occlusion check
+    against the obstacle possible."""
+    camera_obs = env.env.get_obs()
+    return camera_obs["rgb_obs"]["rgb_static"], camera_obs["depth_obs"]["depth_static"]
+
+
 def _lang_goal(lang_embeddings, val_annotations, subtask):
     """Builds the goal dict MDTVAgent.forward() needs: `get_lang_goal()`'s
     own dict, plus the `lang_text` key forward() reads directly (not
@@ -129,13 +143,20 @@ def run_calvin_unshielded_subtask(
     recording's own visualization, see shortstop.calvin_obstacle_viz), plus
     (only when `record_camera_frames=True`) 'camera_frames' (list of
     HxWx3 uint8 rgb_static arrays, one per step incl. the starting pose
-    -- the SAME camera image the policy itself conditions on, fetched via
-    an extra `env.env.get_obs()` call since HulcWrapper.step() only
-    returns its own *transformed* obs, not the raw pixel array; a real
-    CALVIN env only -- FakeEnv-based unit tests never set this True). See
-    shortstop.calvin_obstacle_viz for turning either recording into an
-    MP4. Both recordings are opt-in and off by default: they're only
-    meant for a single illustrative attempt at a time (debug
+    -- the SAME camera image the policy itself conditions on) and
+    'depth_frames' (list of HxW float32 depth_static arrays, real
+    camera-space meters, same convention as camera_projection.
+    project_point's `depth` -- lets shortstop.calvin_obstacle_viz's
+    overlay skip drawing the obstacle where real scene geometry, e.g. the
+    table, actually occludes it). Both fetched together via one extra
+    `env.env.get_obs()` call per step (HulcWrapper.step() only returns
+    its own *transformed* obs, not the raw pixel/depth arrays, and
+    calvin_env computes both from the same render anyway -- see
+    _camera_frame -- so capturing depth alongside rgb costs nothing
+    extra; a real CALVIN env only, FakeEnv-based unit tests never set
+    this True). See shortstop.calvin_obstacle_viz for turning either
+    recording into an MP4. Both recordings are opt-in and off by default:
+    they're only meant for a single illustrative attempt at a time (debug
     visualization), not every attempt of a large sweep -- the
     memory/list-building (and, for camera frames, extra render-call) cost
     is not worth paying when nobody is going to render it.
@@ -165,7 +186,11 @@ def run_calvin_unshielded_subtask(
     steps_taken = 0
     first_chunk = True
     trajectory = [panda_frames(_joint_angles_from_obs(obs))] if record_trajectory else None
-    camera_frames = [env.env.get_obs()["rgb_obs"]["rgb_static"]] if record_camera_frames else None
+    if record_camera_frames:
+        first_rgb, first_depth = _camera_frame(env)
+        camera_frames, depth_frames = [first_rgb], [first_depth]
+    else:
+        camera_frames = depth_frames = None
     while steps_taken < ep_len:
         candidates = policy.propose({**obs, "goal": goal})
         chunk = candidates[0]
@@ -181,7 +206,9 @@ def run_calvin_unshielded_subtask(
             if record_trajectory:
                 trajectory.append(panda_frames(_joint_angles_from_obs(obs)))
             if record_camera_frames:
-                camera_frames.append(env.env.get_obs()["rgb_obs"]["rgb_static"])
+                rgb, depth = _camera_frame(env)
+                camera_frames.append(rgb)
+                depth_frames.append(depth)
 
             clearance = _clearance(obs, obstacle)
             if clearance is not None:
@@ -208,6 +235,7 @@ def run_calvin_unshielded_subtask(
         result["obstacle"] = obstacle
     if record_camera_frames:
         result["camera_frames"] = camera_frames
+        result["depth_frames"] = depth_frames
     return result
 
 

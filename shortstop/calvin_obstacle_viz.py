@@ -77,16 +77,55 @@ def _to_world_frame(local_point, base_position, base_orientation):
     return np.asarray(base_position) + rotation @ np.asarray(local_point)
 
 
-def _overlay_obstacle(frame, obstacle, camera, base_position=(0.0, 0.0, 0.0), base_orientation=(0.0, 0.0, 0.0, 1.0)):
+_OCCLUSION_EPSILON = 0.01  # meters -- avoids z-fighting flicker when the obstacle sits ~on a real surface
+_OFFSCREEN_MARKER_RADIUS = 3.0  # pixels
+_OFFSCREEN_MARKER_MARGIN = 6.0  # pixels -- keeps the clamped marker fully inside the frame, not right on the edge
+
+
+def _is_occluded(depth_frame, pixel_x, pixel_y, depth, width, height):
+    """True if real scene geometry (the table, the arm, ...) is actually
+    closer to the camera than the obstacle at this exact pixel, per
+    `depth_frame` (see calvin_experiment._camera_frame -- real per-pixel
+    camera-space depth in meters, straight from calvin_env's own
+    renderer). A pixel outside the frame can't be occluded by anything
+    in it (nothing to look up), so this only ever returns True for
+    on-screen pixels."""
+    ix, iy = int(round(pixel_x)), int(round(pixel_y))
+    if not (0 <= ix < width and 0 <= iy < height):
+        return False
+    return depth_frame[iy, ix] < depth - _OCCLUSION_EPSILON
+
+
+def _overlay_obstacle(
+    frame, obstacle, camera, base_position=(0.0, 0.0, 0.0), base_orientation=(0.0, 0.0, 0.0, 1.0), depth_frame=None,
+):
     """`frame`: HxWx3 uint8 array (one rgb_static frame). `camera`: the
     calvin_env StaticCamera object that rendered it (read-only here --
     its .viewMatrix/.projectionMatrix/.fov/.height, never mutated).
     `base_position`/`base_orientation`: the robot's base pose in world
     coordinates (see _to_world_frame) -- default is the identity
     transform (local frame == world frame), for callers/tests that don't
-    care about the offset. Returns a new PIL Image with the obstacle
-    drawn as a red circle, or an unmodified copy if `obstacle` is None or
-    projects behind the camera (nothing sane to draw)."""
+    care about the offset.
+
+    `depth_frame`: HxW float32 real camera-space depth in meters (see
+    calvin_experiment._camera_frame), or None to skip the occlusion check
+    entirely (always drawn, the old behavior). A privileged obstacle has
+    no real presence in the PyBullet scene, so if something real (the
+    table, the arm itself) is genuinely closer to the camera at that
+    exact pixel, a real object at the obstacle's position would be
+    hidden behind it too -- drawing the marker anyway would look like it
+    were floating in front of solid geometry it should be behind.
+
+    When the obstacle projects to a pixel outside the visible frame
+    (still in front of the camera -- see project_point -- just outside
+    the static camera's narrow 10-degree FOV, conf/cameras/cameras/
+    static.yaml), a small marker is clamped to the nearest edge instead
+    of drawing nothing, so it reads as "obstacle is nearby but out of
+    view" rather than silently vanishing.
+
+    Returns a new PIL Image with the obstacle drawn, or an unmodified
+    copy if `obstacle` is None, projects behind the camera, or is
+    occluded (nothing sane/visible to draw)."""
     image = Image.fromarray(frame).convert("RGB")
     if obstacle is None:
         return image
@@ -97,11 +136,28 @@ def _overlay_obstacle(frame, obstacle, camera, base_position=(0.0, 0.0, 0.0), ba
         return image
 
     pixel_x, pixel_y, depth = projected
+    if depth_frame is not None and _is_occluded(depth_frame, pixel_x, pixel_y, depth, camera.width, camera.height):
+        return image
+
+    draw = ImageDraw.Draw(image)
     pixel_r = max(2.0, project_radius(obstacle.radius, depth, camera.fov, camera.height))
-    ImageDraw.Draw(image).ellipse(
-        [pixel_x - pixel_r, pixel_y - pixel_r, pixel_x + pixel_r, pixel_y + pixel_r],
-        outline=(255, 0, 0), width=2,
+    fully_offscreen = (
+        pixel_x + pixel_r < 0 or pixel_x - pixel_r > camera.width
+        or pixel_y + pixel_r < 0 or pixel_y - pixel_r > camera.height
     )
+    if fully_offscreen:
+        clamped_x = min(max(pixel_x, _OFFSCREEN_MARKER_MARGIN), camera.width - _OFFSCREEN_MARKER_MARGIN)
+        clamped_y = min(max(pixel_y, _OFFSCREEN_MARKER_MARGIN), camera.height - _OFFSCREEN_MARKER_MARGIN)
+        draw.ellipse(
+            [clamped_x - _OFFSCREEN_MARKER_RADIUS, clamped_y - _OFFSCREEN_MARKER_RADIUS,
+             clamped_x + _OFFSCREEN_MARKER_RADIUS, clamped_y + _OFFSCREEN_MARKER_RADIUS],
+            fill=(255, 0, 0),
+        )
+    else:
+        draw.ellipse(
+            [pixel_x - pixel_r, pixel_y - pixel_r, pixel_x + pixel_r, pixel_y + pixel_r],
+            outline=(255, 0, 0), width=2,
+        )
     return image
 
 
@@ -120,10 +176,14 @@ def save_sequence_video(
     (one per step of that attempt, see
     shortstop.calvin_experiment.run_calvin_unshielded_subtask's
     `record_camera_frames=True`), "obstacle": Obstacle or None,
-    "outcome": "reached"|"violated"|"failed"}. `camera`: the StaticCamera
-    that rendered every one of these frames (the same viewMatrix/
-    projectionMatrix must have produced all of them, or the overlay
-    would be projected against the wrong camera pose).
+    "outcome": "reached"|"violated"|"failed"}, plus optionally
+    "depth_frames" (that same attempt's `depth_frames`, same length as
+    "frames") to enable _overlay_obstacle's occlusion check -- omit or
+    set to None to draw unconditionally (no occlusion check) instead.
+    `camera`: the StaticCamera that rendered every one of these frames
+    (the same viewMatrix/projectionMatrix must have produced all of
+    them, or the overlay would be projected against the wrong camera
+    pose).
 
     `base_position`/`base_orientation`: the robot's base pose in world
     coordinates (env.env.robot.base_position/.base_orientation) -- every
@@ -146,8 +206,12 @@ def save_sequence_video(
 
     frames = []
     for record in subtask_records:
-        for raw_frame in record["frames"]:
-            overlaid = _overlay_obstacle(raw_frame, record["obstacle"], camera, base_position, base_orientation)
+        depth_frames = record.get("depth_frames")
+        for step, raw_frame in enumerate(record["frames"]):
+            depth_frame = depth_frames[step] if depth_frames is not None else None
+            overlaid = _overlay_obstacle(
+                raw_frame, record["obstacle"], camera, base_position, base_orientation, depth_frame,
+            )
             frames.append(np.asarray(overlaid))
         frames.extend([frames[-1]] * freeze_frames)
 
