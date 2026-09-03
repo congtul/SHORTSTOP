@@ -34,8 +34,10 @@ flip to False only when told to prep for release):
   - re-runs the first sequence that actually violated at each radius
     (same per-sequence seed the main sweep already used for it, so it's
     the exact attempt those metrics/stats already reflect) with
-    trajectory recording on, and saves one GIF per subtask attempt --
-    see shortstop/calvin_obstacle_viz.py.
+    trajectory recording on, and merges every subtask attempt of that
+    sequence into ONE mp4 -- matching how the real CALVIN eval pipeline
+    records one continuous video per sequence, not a separate file per
+    subtask -- see shortstop/calvin_obstacle_viz.py.
 
 Everything printed is *also* written to a run-specific output directory
 (printed at the very start and end so it's easy to find) meant to be
@@ -45,8 +47,8 @@ env/checkpoint/dataset:
     run.log       -- exact copy of everything printed to stdout
     results.json  -- same numbers, structured (radius -> violation_rate,
                       success_rate, clearance stats, which sequence/subtask
-                      each GIF came from) -- read this one programmatically
-    gifs/*.gif    -- from the debug obstacle visualization above
+                      each video came from) -- read this one programmatically
+    videos/*.mp4  -- from the debug obstacle visualization above
 """
 import json
 import sys
@@ -70,15 +72,37 @@ from mdt.utils.utils import get_last_checkpoint  # noqa: E402
 from shortstop.calvin_experiment import run_calvin_unshielded_sequence  # noqa: E402
 from shortstop.calvin_metrics import build_fixed_cohort_slots, fixed_cohort_rates  # noqa: E402
 from shortstop.calvin_obstacle import sample_obstacle_from_reference_chunk  # noqa: E402
-from shortstop.calvin_obstacle_viz import save_subtask_gif  # noqa: E402
+from shortstop.calvin_obstacle_viz import save_sequence_video  # noqa: E402
 
 # Candidate obstacle radii to sweep (meters) -- edit this list directly
 # while tuning; no config knob for it yet since we're still narrowing the
 # range by hand, see module docstring.
-RADII_TO_SWEEP = [0.02, 0.05, 0.08, 0.12]
+#
+# TUNED (real run, n_sequences=100, checkpoint/dataset per docs/CALVIN_SETUP.md):
+# swept [0.02, 0.05, 0.08, 0.12] -> violation_rate 0.076/0.108/0.128/0.148,
+# success_rate 0.704/0.586/0.482/0.412 (baseline without obstacle: 0.930).
+# No floor effect at 0.02 (violation_rate already meaningfully nonzero), no
+# ceiling effect reached by 0.12 (nowhere near 100%) -- full table + the
+# min_clearance+radius=const sanity-check finding in
+# docs/PARAMETERS_REFERENCE.md muc 1's "radius" entry. CHOSE r=0.08 as the
+# default (shortstop.calvin_obstacle.sample_obstacle_from_reference_chunk's
+# own default arg) -- balances a meaningful violation_rate against still
+# leaving success_rate well above 0 for a shield to visibly improve.
+# Re-sweep (edit this list) if the checkpoint/dataset ever changes, or to
+# see where ceiling effect kicks in above 0.12 (not yet explored).
+RADII_TO_SWEEP = [0.08]
+
+# Resuming a killed/interrupted run: trim RADII_TO_SWEEP above to just the
+# radii not yet completed (check the previous run's run.log), and flip
+# this to False so this run doesn't redo "without obstacle" too (its own
+# result never depends on which radii are being swept, so a previous
+# run's logged number for it is still valid -- no need to ever re-run
+# it just because the radius list changed). Set back to True for a full
+# from-scratch run.
+INCLUDE_WITHOUT_OBSTACLE = True
 
 RUN_OUTPUT_DIR = REPO_ROOT / "outputs" / "calvin_unshielded_runs" / f"run_{datetime.now():%Y%m%d_%H%M%S}"
-VIS_OUTPUT_DIR = RUN_OUTPUT_DIR / "gifs"
+VIS_OUTPUT_DIR = RUN_OUTPUT_DIR / "videos"
 
 _LOG_FILE = None  # opened at the top of main(), see _log()
 
@@ -135,7 +159,7 @@ def _find_first_violating_sequence_idx(sequence_results):
     return None
 
 
-def _save_debug_gifs(
+def _save_debug_videos(
     sequence_idx, radius, obstacle_fn, env, policy, task_oracle, lang_embeddings, val_annotations,
     get_env_state_for_initial_condition, cfg, eval_sequences, sequence_seed_base,
 ):
@@ -143,24 +167,41 @@ def _save_debug_gifs(
     main sweep already used for it -- reseeding is per-idx for *every*
     sequence in that sweep, not just this one, so this reproduces exactly
     the attempt that already contributed to the printed metrics/stats,
-    whichever idx is picked) with trajectory recording on, saves one GIF
-    per subtask attempt of that sequence to VIS_OUTPUT_DIR. Returns how
-    many GIFs were written."""
+    whichever idx is picked) with trajectory recording on, and merges
+    every subtask attempt of that sequence into ONE mp4 under
+    VIS_OUTPUT_DIR -- matching how the real CALVIN eval pipeline records
+    one continuous video per sequence, not a separate file per subtask.
+    Returns the (1-element) list of video path(s) written, kept as a
+    list for results.json shape compatibility."""
     initial_state, eval_sequence = eval_sequences[sequence_idx]
     seed_everything(sequence_seed_base + sequence_idx, workers=True)
     attempts = run_calvin_unshielded_sequence(
         env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
         get_env_state_for_initial_condition, ep_len=cfg.ep_len, replan_steps=cfg.multistep,
-        obstacle_fn=obstacle_fn, record_trajectory=True,
+        obstacle_fn=obstacle_fn, record_trajectory=True, record_camera_frames=True,
     )
     VIS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     safe_radius = str(radius).replace(".", "p")
-    gif_paths = []
-    for i, attempt in enumerate(attempts):
-        out_path = VIS_OUTPUT_DIR / f"seq{sequence_idx}_subtask{i}_r{safe_radius}.gif"
-        save_subtask_gif(attempt["trajectory"], attempt["obstacle"], str(out_path))
-        gif_paths.append(str(out_path.relative_to(RUN_OUTPUT_DIR)))
-    return gif_paths
+
+    subtask_records = []
+    for subtask, attempt in zip(eval_sequence, attempts):
+        if attempt["violated"]:
+            outcome = "violated"
+        elif attempt["reached"]:
+            outcome = "reached"
+        else:
+            outcome = "failed"  # ran out of ep_len without reaching or violating
+        subtask_records.append({
+            "subtask": subtask,
+            "frames": attempt["camera_frames"],
+            "obstacle": attempt["obstacle"],
+            "outcome": outcome,
+        })
+
+    static_camera = next(cam for cam in env.env.cameras if cam.name == "static")
+    out_path = VIS_OUTPUT_DIR / f"seq{sequence_idx}_r{safe_radius}.mp4"
+    save_sequence_video(subtask_records, static_camera, str(out_path))
+    return [str(out_path.relative_to(RUN_OUTPUT_DIR))]
 
 
 class _ForwardOnlyPolicy:
@@ -186,7 +227,7 @@ def main(cfg):
     global _LOG_FILE
     RUN_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     _LOG_FILE = open(RUN_OUTPUT_DIR / "run.log", "w", encoding="utf-8")
-    _log(f"[run] writing log + results.json (+ gifs/ if any) to: {RUN_OUTPUT_DIR}")
+    _log(f"[run] writing log + results.json (+ videos/ if any) to: {RUN_OUTPUT_DIR}")
     _log(f"[run] config: num_sequences={cfg.num_sequences} ep_len={cfg.ep_len} multistep={cfg.multistep} "
          f"sampler_type={cfg.sampler_type} num_sampling_steps={cfg.num_sampling_steps} debug={cfg.debug}")
 
@@ -223,7 +264,7 @@ def main(cfg):
     # many sequences, not per-sequence as the comparison is meant to show.
     SEQUENCE_SEED_BASE = 1000
 
-    labels_and_obstacle_fns = [("without obstacle", None, None)] + [
+    labels_and_obstacle_fns = ([("without obstacle", None, None)] if INCLUDE_WITHOUT_OBSTACLE else []) + [
         (
             f"with obstacle r={r}",
             lambda joint_angles, chunk, r=r: sample_obstacle_from_reference_chunk(joint_angles, chunk, radius=r),
@@ -233,7 +274,7 @@ def main(cfg):
     ]
 
     results = []
-    total_gifs_saved = 0
+    total_videos_saved = 0
     for label, obstacle_fn, radius in labels_and_obstacle_fns:
         sequence_results = []
         for idx, (initial_state, eval_sequence) in enumerate(eval_sequences):
@@ -258,8 +299,8 @@ def main(cfg):
             "avg_seq_len": success_rate * 5,
             "n_sequences": cfg.num_sequences,
             "clearance_stats": None,
-            "gif_paths": None,
-            "gif_skip_reason": None,
+            "video_paths": None,
+            "video_skip_reason": None,
         }
 
         if cfg.debug:
@@ -270,21 +311,21 @@ def main(cfg):
                 vis_idx = _find_first_violating_sequence_idx(sequence_results)
                 if vis_idx is None:
                     reason = ("no sequence violated at this radius -- radius is likely too small "
-                              "to show anything at this checkpoint's paths; skipping GIF")
+                              "to show anything at this checkpoint's paths; skipping video")
                     _log(f"  [debug] {label}: {reason}")
-                    entry["gif_skip_reason"] = reason
+                    entry["video_skip_reason"] = reason
                 else:
-                    gif_paths = _save_debug_gifs(
+                    video_paths = _save_debug_videos(
                         vis_idx, radius, obstacle_fn, env, policy, task_oracle, lang_embeddings, val_annotations,
                         get_env_state_for_initial_condition, cfg, eval_sequences, SEQUENCE_SEED_BASE,
                     )
-                    total_gifs_saved += len(gif_paths)
-                    entry["gif_paths"] = gif_paths
+                    total_videos_saved += len(video_paths)
+                    entry["video_paths"] = video_paths
 
         results.append(entry)
 
-    if cfg.debug and total_gifs_saved > 0:
-        _log(f"[debug] saved {total_gifs_saved} obstacle-visualization GIF(s) under: {VIS_OUTPUT_DIR}")
+    if cfg.debug and total_videos_saved > 0:
+        _log(f"[debug] saved {total_videos_saved} obstacle-visualization video(s) under: {VIS_OUTPUT_DIR}")
 
     results_path = RUN_OUTPUT_DIR / "results.json"
     with open(results_path, "w", encoding="utf-8") as f:

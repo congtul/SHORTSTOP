@@ -35,19 +35,16 @@ Ground-truth collision check (_clearance) uses the *full-arm capsule
 chain* (robot_geometry.capsule_segments -- one capsule per link, link0
 through link7) plus a gripper-tip capsule (flange to
 robot_geometry.gripper_tip_position(), covering panda_hand + the fingers
-past the flange) -- NOT just the 4 named sphere points
-(elbow/forearm/wrist/gripper) alone. A collision partway along a link
-(elbow/forearm/wrist links are 0.14-0.35m long, far longer than their
-own point-sphere radius), on a link with no named sphere at all
-(link0/1/2/4/6), or at the fingertips (which point *ahead* of the flange
-in the direction of travel, past where a flange-centered sphere alone
-would ever detect anything) would be invisible to a sphere_centers()-
-only check. NOTE: shortstop.arm_reach's reachtube (used by the shield's
-own Certify step, once wired in) still uses only the 4 point-spheres --
-it has NOT been upgraded to capsules yet. Until it is, the shield would
-certify against a coarser geometry than this ground-truth check measures
-against, a real mismatch to fix before trusting a real
-shielded-vs-unshielded comparison on CALVIN.
+past the flange). A collision partway along a link (elbow/forearm/wrist
+links are 0.14-0.35m long, far longer than a single point's own radius),
+on a link with no dedicated check point at all, or at the fingertips
+(which point *ahead* of the flange in the direction of travel, past
+where a flange-centered point alone would ever detect anything) is
+covered. shortstop.arm_reach's reachtube (used by the shield's own
+Certify step, once wired in) was upgraded in step to check the same
+9-frame chain (robot_geometry.FRAME_RADIUS/panda_frames(), not a coarser
+named subset of it) -- see its module docstring for the residual
+per-point-box (vs. exact capsule) approximation that remains there.
 """
 import numpy as np
 
@@ -57,7 +54,6 @@ from .robot_geometry import (
     gripper_tip_position,
     panda_frames,
     point_to_segment_distance,
-    sphere_centers,
 )
 
 ROBOT_OBS_RAW_JOINT_SLICE = slice(7, 14)
@@ -81,9 +77,8 @@ def _clearance(obs, obstacle):
     boundary. `None` if there is no obstacle at all (nothing to measure
     clearance against).
 
-    See module docstring for why this checks the full capsule chain (not
-    just sphere_centers()'s 4 named points) -- a sphere/capsule is a
-    physical volume, and real collision happens at
+    See module docstring for why this checks the full capsule chain -- a
+    sphere/capsule is a physical volume, and real collision happens at
     center/axis-distance <= obstacle.radius + the primitive's own radius;
     omitting either the arm's thickness, the *length* of a link between
     its two named endpoints, or the fingers reaching out past the flange
@@ -118,6 +113,7 @@ def _lang_goal(lang_embeddings, val_annotations, subtask):
 def run_calvin_unshielded_subtask(
     env, policy, task_oracle, lang_embeddings, subtask, val_annotations,
     ep_len=360, replan_steps=10, obstacle_fn=None, record_trajectory=False,
+    record_camera_frames=False,
 ):
     """One subtask attempt, unshielded: `policy.propose(...)`'s first
     candidate is executed directly, no filtering at all -- matches
@@ -126,12 +122,21 @@ def run_calvin_unshielded_subtask(
 
     Returns {'violated': bool, 'reached': bool, 'min_clearance': float or
     None}, plus (only when `record_trajectory=True`) 'trajectory' (list of
-    (4, 3) sphere_centers() arrays, one per step incl. the starting pose --
-    see shortstop.calvin_obstacle_viz) and 'obstacle' (the Obstacle actually
-    used, or None). Recording is opt-in and off by default: it's only meant
-    for a single illustrative attempt at a time (debug visualization), not
-    every attempt of a large sweep -- the memory/list-building cost is not
-    worth paying when nobody is going to render it.
+    (9, 3) panda_frames() arrays -- the whole chain, base through flange,
+    not a coarser named subset of it -- one per step incl. the starting
+    pose) and 'obstacle' (the Obstacle actually used, or None), plus
+    (only when `record_camera_frames=True`) 'camera_frames' (list of
+    HxWx3 uint8 rgb_static arrays, one per step incl. the starting pose
+    -- the SAME camera image the policy itself conditions on, fetched via
+    an extra `env.env.get_obs()` call since HulcWrapper.step() only
+    returns its own *transformed* obs, not the raw pixel array; a real
+    CALVIN env only -- FakeEnv-based unit tests never set this True). See
+    shortstop.calvin_obstacle_viz for turning either recording into an
+    MP4. Both recordings are opt-in and off by default: they're only
+    meant for a single illustrative attempt at a time (debug
+    visualization), not every attempt of a large sweep -- the
+    memory/list-building (and, for camera frames, extra render-call) cost
+    is not worth paying when nobody is going to render it.
 
     `min_clearance` is the smallest `_clearance()` value seen over every
     step of this attempt (see its docstring) -- `None` when `obstacle_fn`
@@ -157,7 +162,8 @@ def run_calvin_unshielded_subtask(
     min_clearance = None
     steps_taken = 0
     first_chunk = True
-    trajectory = [sphere_centers(_joint_angles_from_obs(obs))] if record_trajectory else None
+    trajectory = [panda_frames(_joint_angles_from_obs(obs))] if record_trajectory else None
+    camera_frames = [env.env.get_obs()["rgb_obs"]["rgb_static"]] if record_camera_frames else None
     while steps_taken < ep_len:
         candidates = policy.propose({**obs, "goal": goal})
         chunk = candidates[0]
@@ -171,7 +177,9 @@ def run_calvin_unshielded_subtask(
             steps_taken += 1
 
             if record_trajectory:
-                trajectory.append(sphere_centers(_joint_angles_from_obs(obs)))
+                trajectory.append(panda_frames(_joint_angles_from_obs(obs)))
+            if record_camera_frames:
+                camera_frames.append(env.env.get_obs()["rgb_obs"]["rgb_static"])
 
             clearance = _clearance(obs, obstacle)
             if clearance is not None:
@@ -195,13 +203,15 @@ def run_calvin_unshielded_subtask(
     if record_trajectory:
         result["trajectory"] = trajectory
         result["obstacle"] = obstacle
+    if record_camera_frames:
+        result["camera_frames"] = camera_frames
     return result
 
 
 def run_calvin_unshielded_sequence(
     env, policy, task_oracle, lang_embeddings, initial_condition, eval_sequence, val_annotations,
     get_env_state_for_initial_condition, ep_len=360, replan_steps=10, obstacle_fn=None,
-    record_trajectory=False,
+    record_trajectory=False, record_camera_frames=False,
 ):
     """One full sequence attempt (up to `len(eval_sequence)` subtasks),
     stopping at the first failed/violated subtask -- mirrors CALVIN's own
@@ -214,9 +224,10 @@ def run_calvin_unshielded_sequence(
     to run_calvin_unshielded_subtask for each subtask (see its docstring
     for why the obstacle is derived from the actually-executed chunk
     instead of a separate speculative propose() call). `record_trajectory`
-    likewise forwarded as-is to every subtask -- see that function's
-    docstring; only use this for a single sequence you intend to visualize
-    (shortstop.calvin_obstacle_viz), not a full metrics sweep.
+    and `record_camera_frames` likewise forwarded as-is to every subtask
+    -- see that function's docstring; only use these for a single
+    sequence you intend to visualize (shortstop.calvin_obstacle_viz), not
+    a full metrics sweep.
     Returns a list of 0..len(eval_sequence) per-subtask {'violated',
     'reached'} dicts -- feed this (one list per launched sequence) into
     shortstop.calvin_metrics.build_fixed_cohort_slots.
@@ -229,7 +240,7 @@ def run_calvin_unshielded_sequence(
         result = run_calvin_unshielded_subtask(
             env, policy, task_oracle, lang_embeddings, subtask, val_annotations,
             ep_len=ep_len, replan_steps=replan_steps, obstacle_fn=obstacle_fn,
-            record_trajectory=record_trajectory,
+            record_trajectory=record_trajectory, record_camera_frames=record_camera_frames,
         )
         attempts.append(result)
         if not result["reached"]:

@@ -13,9 +13,14 @@ calculations, which is what makes a real-time reachability certify step
 possible at all.
 
 This module gives just the geometry: modified-DH forward kinematics for the
-7 joints, and the fixed set of "key" frames used as sphere centers. It does
-not touch the dynamics/action-space question (see shortstop/arm_reach.py for
-how a task-space action gets turned into a joint-config update).
+7 joints (panda_frames(), 9 positions: base, 7 joints, flange), and the
+capsule-chain safety geometry built from those frames (capsule_segments(),
+one capsule per link, covering the whole arm -- no coarser named subset of
+frames is exposed here anymore; both the ground-truth check
+(calvin_experiment._clearance) and the shield's own reachtube
+(arm_reach.propagate_arm_tube) check the full chain). Does not touch the
+dynamics/action-space question (see shortstop/arm_reach.py for how a
+task-space action gets turned into a joint-config update).
 
 DH table: the standard modified-DH (Craig convention) parameters published
 for the Panda (matches Franka's own documentation and the values used in
@@ -40,79 +45,46 @@ FLANGE_OFFSET = (0.0, 0.0, 0.107)  # (alpha, a, d) from joint 7 frame to flange,
 
 N_JOINTS = 7
 
-# Which frames' origins double as sphere centers for the safety geometry, and
-# how big each sphere is (meters). Indices are into the *frame* list returned
-# by panda_frames() (0 = base, 1..7 = joint frames, 8 = flange/end-effector).
-# 4 spheres along elbow -> forearm -> wrist -> gripper: coarser than a real
-# ARMTD-style multi-sphere-per-link model, but each sphere is (loosely) at a
-# frame the arm's own state is available at with no extra modeling.
-SPHERE_FRAME_INDICES = [3, 5, 7, 8]
-SPHERE_NAMES = ["elbow", "forearm", "wrist", "gripper"]
+# FLANGE_FRAME_INDEX names the last entry of panda_frames() (index 8 =
+# flange/end-effector) -- used wherever code needs "the tip of the chain"
+# without a magic number (e.g. calvin_obstacle.sample_obstacle_from_
+# reference_chunk's default placement, or a test's "where does the
+# gripper end up" check).
+FLANGE_FRAME_INDEX = N_JOINTS + 1
 
-# Measured from the real collision meshes shipped with mdt_policy's
-# calvin_env (mdt_policy/calvin_env/data/franka_panda/meshes/collision/
-# {link3,link5,link7,hand}.obj), confirmed to be the right mesh for each
-# name by cross-checking every PANDA_DH row against the URDF's own joint
-# <origin> values (both agree exactly, e.g. d=0.333/a=0.0825/d=0.384/
-# a=0.088/flange 0.107) -- panda_frames()'s positions[3]/[5]/[7] are
-# exactly panda_link{3,5,7}'s own origin, and positions[8] (flange)
-# coincides in position (not just approximately) with panda_hand's
-# origin (panda_hand_joint's <origin> has zero xyz translation, only a
-# yaw rotation), so each link's collision mesh is already expressed in
-# a local frame centered exactly on our sphere point.
+# Per-link (link0..link7) capsule radius, measured from the real collision
+# meshes shipped with mdt_policy's calvin_env
+# (mdt_policy/calvin_env/data/franka_panda/meshes/collision/link{0..7}.obj),
+# confirmed to be the right mesh for each link by cross-checking every
+# PANDA_DH row against the URDF's own joint <origin> values (both agree
+# exactly, e.g. d=0.333/a=0.0825/d=0.384/a=0.088/flange 0.107) -- panda_
+# frames()'s positions[i] are exactly panda_link{i}'s own origin, so each
+# link's collision mesh is already expressed in a local frame centered
+# exactly on that frame's point.
 #
-# Method: loaded each mesh's vertices, found the principal (longest)
-# axis via SVD (a link's mesh is long-and-thin along the arm, not
-# spherical), took the *perpendicular* distance from that axis for every
-# vertex (this is what separates true cross-sectional thickness from the
-# link's length -- naively using raw distance from the origin point
-# conflates the two and wildly overestimates, e.g. forearm's raw max
-# vertex distance is 0.27m, almost all of which is the link's 0.35m
-# length, not its girth), then took the max perpendicular distance
-# (safety margin: cover the mesh's full real cross-section, not just a
-# typical/median slice) rounded up to the nearest cm:
-#   elbow (link3):   max perp radius 0.085m -> 0.09m
-#   forearm (link5): max perp radius 0.093m -> 0.10m
-#   wrist (link7):   max perp radius 0.054m -> 0.06m
-#   gripper (hand):  max perp radius 0.048m -> 0.05m
-# Still a real simplification even with a measured number: one sphere
-# per link cannot capture a link's full along-axis extent (elbow/
-# forearm/wrist links span 0.14-0.35m -- see the perpendicular-radius
-# script this was derived from), and links 1/2/4/6 have no sphere of
-# their own at all (coarser than a real ARMTD-style multi-sphere-per-link
-# model, by design -- see module docstring). Re-derive by rerunning the
-# same mesh analysis if SPHERE_FRAME_INDICES/PANDA_DH ever change, or if
-# a tighter (multi-sphere-per-link) model is worth the added complexity.
-SPHERE_RADII = [0.09, 0.10, 0.06, 0.05]
-
-# name -> physical radius lookup, used by arm_reach.propagate_arm_tube and
-# calvin_experiment._clearance to inflate the safety margin by the arm's own
-# thickness, not just disturbance/model-error (a sphere is a physical volume,
-# not a point -- collision is center-distance <= obstacle.radius + this).
-SPHERE_RADIUS = dict(zip(SPHERE_NAMES, SPHERE_RADII))
-
-# Per-link (link0..link7) capsule radius -- same "max perpendicular-to-
-# principal-axis" measurement as SPHERE_RADII above (see its docstring),
-# just applied to *every* one of the 8 real collision meshes
-# (mdt_policy/calvin_env/data/franka_panda/meshes/collision/link{0..7}.obj)
-# instead of only the 4 already picked as named sphere points:
+# Method: loaded each mesh's vertices, found the principal (longest) axis
+# via SVD (a link's mesh is long-and-thin along the arm, not spherical),
+# took the *perpendicular* distance from that axis for every vertex (this
+# is what separates true cross-sectional thickness from the link's length
+# -- naively using raw distance from the origin point conflates the two
+# and wildly overestimates, e.g. forearm's raw max vertex distance is
+# 0.27m, almost all of which is the link's 0.35m length, not its girth),
+# then took the max perpendicular distance (safety margin: cover the
+# mesh's full real cross-section, not just a typical/median slice)
+# rounded up to the nearest cm:
 #   link0 0.1206->0.13  link1 0.1002->0.11  link2 0.0995->0.10
 #   link3 0.0854->0.09  link4 0.0862->0.09  link5 0.0930->0.10
 #   link6 0.1082->0.11  link7 0.0538->0.06
-# (link3/5/7 match SPHERE_RADII's elbow/forearm/wrist exactly -- same
-# source mesh, same method, a sanity check that both measurements agree.)
 #
 # A capsule from panda_frames()[i] to panda_frames()[i+1] with
 # LINK_RADIUS[i] covers link i's *entire* physical span, not just one
-# end -- fixing the 4-named-sphere model's blind spot: a collision
-# happening partway along a link (elbow/forearm/wrist links are
-# 0.14-0.35m long, far longer than their own sphere radius) or on a link
-# with no named sphere at all (link0/1/2/4/6) was invisible to
-# sphere_centers()-based checks alone. See capsule_segments() below.
-# Does NOT cover panda_hand's own bulk beyond the flange (frame 8) --
-# that's what SPHERE_RADIUS["gripper"] and GRIPPER_TIP_OFFSET/RADIUS
-# below are for, layered on top of this chain by
-# calvin_experiment._clearance, not a capsule endpoint here.
+# end -- a single point-sphere at each endpoint alone would miss a
+# collision happening partway along a link (elbow/forearm/wrist links are
+# 0.14-0.35m long, far longer than their own radius). See
+# capsule_segments() below. Does NOT cover panda_hand's own bulk beyond
+# the flange (frame 8) -- that's what GRIPPER_TIP_OFFSET/RADIUS below are
+# for, layered on top of this chain by calvin_experiment._clearance, not
+# a capsule endpoint here.
 LINK_RADIUS = [0.13, 0.11, 0.10, 0.09, 0.09, 0.10, 0.11, 0.06]
 
 # panda.urdf's fixed joint chain past the flange: panda_hand_joint
@@ -128,19 +100,42 @@ GRIPPER_TIP_OFFSET = 0.1
 
 # Capsule radius for the flange->TCP segment (fingers + the part of
 # panda_hand beyond the flange -- see gripper_tip_position()'s docstring
-# for why this region needs its own check, not just SPHERE_RADIUS
-# ["gripper"]'s point sphere at the flange). finger.obj's own measured
-# cross-section (same method as LINK_RADIUS) is a mere 0.019m -- but the
-# two fingers *also* spread apart laterally up to 0.04m each side when
-# open (panda_finger_joint1/2's prismatic limit in panda.urdf), and this
-# capsule doesn't model gripper open/close state at all (a single fixed
-# radius along the centerline instead of two separate finger capsules
-# that move with the gripper's actual width). 0.04 (max one-sided finger
-# spread) + 0.02 (finger's own thickness, rounded up from 0.019) = 0.06,
-# a deliberately conservative fixed bound for "gripper anywhere from
-# fully closed to fully open", not a precise measurement the way
-# LINK_RADIUS/SPHERE_RADII are.
+# for why this region needs its own check, not just a point sphere at
+# the flange itself). finger.obj's own measured cross-section (same
+# method as LINK_RADIUS) is a mere 0.019m -- but the two fingers *also*
+# spread apart laterally up to 0.04m each side when open (panda_finger_
+# joint1/2's prismatic limit in panda.urdf), and this capsule doesn't
+# model gripper open/close state at all (a single fixed radius along the
+# centerline instead of two separate finger capsules that move with the
+# gripper's actual width). 0.04 (max one-sided finger spread) + 0.02
+# (finger's own thickness, rounded up from 0.019) = 0.06, a deliberately
+# conservative fixed bound for "gripper anywhere from fully closed to
+# fully open", not a precise measurement the way LINK_RADIUS is.
 GRIPPER_TIP_RADIUS = 0.06
+
+# Conservative per-*frame* radius (index 0..8, matching panda_frames()),
+# used by arm_reach.propagate_arm_tube to inflate a reachtube box at
+# *every* frame of the chain -- replaces the coarser 4-named-point model
+# (elbow/forearm/wrist/gripper) this module used to expose, so the
+# shield's own Certify step now covers the same 9-frame chain as
+# calvin_experiment._clearance's ground-truth capsule check, instead of
+# a 4-point subset of it.
+#
+# A frame sits at the junction of up to two links, so its own physical
+# extent is bounded by whichever adjacent link is thicker: frame 0
+# (base) only touches link0; frame i (1<=i<=7) touches link(i-1) and
+# link(i); frame 8 (flange) touches link7 *and* must also cover the
+# fingers reaching past it (GRIPPER_TIP_OFFSET + GRIPPER_TIP_RADIUS) --
+# propagate_arm_tube has no orientation tracking (see its module
+# docstring), so it cannot propagate the fingertip as its own point the
+# way calvin_experiment._clearance does with gripper_tip_position();
+# this folds the entire flange->fingertip reach into one conservative
+# sphere centered on the flange point instead.
+FRAME_RADIUS = (
+    [LINK_RADIUS[0]]
+    + [max(LINK_RADIUS[i - 1], LINK_RADIUS[i]) for i in range(1, len(LINK_RADIUS))]
+    + [GRIPPER_TIP_OFFSET + GRIPPER_TIP_RADIUS]
+)
 
 
 def _mdh_transform(alpha, a, d, theta):
@@ -203,21 +198,13 @@ def gripper_tip_position(joint_angles):
     return flange_position + flange_rotation @ np.array([0.0, 0.0, GRIPPER_TIP_OFFSET])
 
 
-def sphere_centers(joint_angles):
-    """Positions of the safety-geometry sphere centers (4, 3), in the order
-    of SPHERE_NAMES."""
-    frames = panda_frames(joint_angles)
-    return frames[SPHERE_FRAME_INDICES]
-
-
 def capsule_segments(joint_angles):
     """8 capsules covering the *entire* arm (link0..link7), each as
     (point_a, point_b, radius): point_a/point_b are consecutive
     panda_frames() positions (frame i, frame i+1), radius is that link's
-    own LINK_RADIUS[i] -- see LINK_RADIUS's docstring for why this (not
-    sphere_centers()'s 4 named points) is the check to use whenever a
-    collision could occur anywhere along a link's length, not just at
-    one of its two endpoints, or on a link with no named sphere at all.
+    own LINK_RADIUS[i] -- this is the check to use whenever a collision
+    could occur anywhere along a link's length, not just at one of its
+    two endpoints.
     """
     frames = panda_frames(joint_angles)
     return [(frames[i], frames[i + 1], LINK_RADIUS[i]) for i in range(len(LINK_RADIUS))]

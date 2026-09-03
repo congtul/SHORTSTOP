@@ -17,9 +17,9 @@ def test_arm_reach_only_shield_rejects_a_chunk_that_hits_an_obstacle():
 
     # obstacle placed where the "unsafe" chunk's gripper ends up
     from shortstop.arm_reach import propagate_arm_tube
-    from shortstop.robot_geometry import SPHERE_NAMES
+    from shortstop.robot_geometry import FLANGE_FRAME_INDEX
     tube = propagate_arm_tube(q, unsafe, w_bar=0.0, model_error=0.0)
-    obstacle = Obstacle(center=tube[-1][SPHERE_NAMES[-1]].center(), radius=0.05)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
 
     shield = ArmReachOnlyShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0)
     action, info = shield.select(q, [unsafe, safe], scores=[1.0, 0.0])
@@ -31,10 +31,10 @@ def test_arm_reach_only_shield_rejects_a_chunk_that_hits_an_obstacle():
 def test_arm_stl_shield_rejects_within_margin_even_if_reach_only_would_accept():
     q = np.zeros(N_JOINTS)
     from shortstop.arm_reach import propagate_arm_tube
-    from shortstop.robot_geometry import SPHERE_NAMES
+    from shortstop.robot_geometry import FLANGE_FRAME_INDEX
     chunk = _straight_chunk(0.05)
     tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
-    gripper_end = tube[-1][SPHERE_NAMES[-1]].center()
+    gripper_end = tube[-1][FLANGE_FRAME_INDEX].center()
 
     # obstacle just outside the true collision radius but inside STL's margin
     obstacle = Obstacle(center=gripper_end, radius=0.02)
@@ -46,10 +46,10 @@ def test_arm_stl_shield_rejects_within_margin_even_if_reach_only_would_accept():
 def test_arm_repair_shield_fixes_a_rejected_candidate_and_still_certifies_it():
     q = np.zeros(N_JOINTS)
     from shortstop.arm_reach import propagate_arm_tube
-    from shortstop.robot_geometry import SPHERE_NAMES
+    from shortstop.robot_geometry import FLANGE_FRAME_INDEX
     chunk = _straight_chunk(0.05)
     tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
-    obstacle = Obstacle(center=tube[-1][SPHERE_NAMES[-1]].center(), radius=0.05)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
 
     shield = ArmRepairShield(
         obstacles=[obstacle], w_bar=0.0, model_error=0.0, epsilon=0.02,
@@ -67,9 +67,9 @@ def test_arm_repair_shield_falls_back_when_repair_cannot_fix_it_in_time():
     q = np.zeros(N_JOINTS)
     chunk = _straight_chunk(0.05)
     from shortstop.arm_reach import propagate_arm_tube
-    from shortstop.robot_geometry import SPHERE_NAMES
+    from shortstop.robot_geometry import FLANGE_FRAME_INDEX
     tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
-    obstacle = Obstacle(center=tube[-1][SPHERE_NAMES[-1]].center(), radius=0.05)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
 
     # tiny trust region + tiny step -> repair can't move far enough to clear
     shield = ArmRepairShield(

@@ -10,7 +10,7 @@ import torch
 from shortstop.calvin_experiment import run_calvin_unshielded_sequence, run_calvin_unshielded_subtask
 from shortstop.calvin_metrics import build_fixed_cohort_slots, fixed_cohort_rates
 from shortstop.env import Obstacle
-from shortstop.robot_geometry import N_JOINTS, sphere_centers
+from shortstop.robot_geometry import N_JOINTS, panda_frames
 
 SUBTASK = "fake_subtask"
 
@@ -93,7 +93,7 @@ def test_unshielded_subtask_stops_at_violation_and_never_reaches():
     # before the task_oracle would succeed at step 12
     obstacle_joint_angles = np.zeros(N_JOINTS)
     obstacle_joint_angles[0] = 0.1 * 6
-    obstacle = Obstacle(center=sphere_centers(obstacle_joint_angles)[-1], radius=0.02)
+    obstacle = Obstacle(center=panda_frames(obstacle_joint_angles)[-1], radius=0.02)
 
     result = run_calvin_unshielded_subtask(
         env, FakePolicy(), FakeTaskOracle(success_after_steps=12), FakeLangEmbeddings(), SUBTASK, VAL_ANNOTATIONS,
@@ -121,7 +121,7 @@ def test_violation_rate_and_success_rate_differ_with_vs_without_obstacle():
 
     obstacle_joint_angles = np.zeros(N_JOINTS)
     obstacle_joint_angles[0] = 0.1 * 6
-    obstacle = Obstacle(center=sphere_centers(obstacle_joint_angles)[-1], radius=0.02)
+    obstacle = Obstacle(center=panda_frames(obstacle_joint_angles)[-1], radius=0.02)
 
     n_sequences = 20
     results_without = [make_sequence_result(None) for _ in range(n_sequences)]

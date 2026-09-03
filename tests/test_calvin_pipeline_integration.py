@@ -11,7 +11,7 @@ from shortstop.arm_reach import propagate_arm_tube
 from shortstop.arm_shield import ArmRepairShield
 from shortstop.env import Obstacle
 from shortstop.mdt_policy_client import MockMDTPolicyClient
-from shortstop.robot_geometry import N_JOINTS, SPHERE_NAMES
+from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS
 
 
 def test_full_propose_reach_certify_repair_loop_on_synthetic_candidates():
@@ -25,7 +25,7 @@ def test_full_propose_reach_certify_repair_loop_on_synthetic_candidates():
     endpoints = []
     for c in candidates:
         tube = propagate_arm_tube(q, c, w_bar=0.0, model_error=0.0)  # Reach
-        endpoints.append(tube[-1][SPHERE_NAMES[-1]].center())
+        endpoints.append(tube[-1][FLANGE_FRAME_INDEX].center())
     target = max(endpoints, key=lambda p: p[0])
     obstacle = Obstacle(center=target, radius=0.05)
 

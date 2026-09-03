@@ -1,7 +1,7 @@
 import numpy as np
 
 from shortstop.calvin_obstacle import sample_obstacle_from_reference_chunk
-from shortstop.robot_geometry import N_JOINTS, SPHERE_NAMES, panda_frames
+from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS, panda_frames
 
 
 def test_obstacle_sits_at_the_reference_chunk_gripper_endpoint():
@@ -17,14 +17,14 @@ def test_obstacle_sits_at_the_reference_chunk_gripper_endpoint():
     assert obstacle.radius == 0.05
 
 
-def test_obstacle_frame_matches_sphere_centers_frame():
-    """The obstacle must live in the same frame sphere_centers() reports,
+def test_obstacle_frame_matches_panda_frames_frame():
+    """The obstacle must live in the same frame panda_frames() reports,
     since calvin_experiment checks real per-step joint angles against it
     directly with no extra transform -- a chunk that keeps the arm still
     should place the obstacle essentially at the arm's own current pose.
     """
     q0 = np.zeros(N_JOINTS)
     still_chunk = np.zeros((3, 7))
-    obstacle = sample_obstacle_from_reference_chunk(q0, still_chunk, radius=0.05, sphere_name=SPHERE_NAMES[-1])
+    obstacle = sample_obstacle_from_reference_chunk(q0, still_chunk, radius=0.05, frame_index=FLANGE_FRAME_INDEX)
     current_gripper = panda_frames(q0)[-1]
     assert np.allclose(obstacle.center, current_gripper)

@@ -89,6 +89,20 @@ Mỗi tham số dưới đây dùng chung ở nhiều class (2D lẫn arm/CALVIN
 - **4 sphere-điểm không đủ để check va chạm dọc theo link** (câu hỏi user đặt ra trực tiếp): elbow/forearm/wrist chỉ là 1 ĐIỂM + bán kính cắt ngang tại 1 đầu của link, nhưng link đó thật ra dài 0.14–0.35m (đo từ mesh) — obstacle nằm giữa link (không trúng đúng điểm sphere) sẽ bị bỏ sót. Thêm nữa, link0/1/2/4/6 không có sphere nào đại diện cả. **Đã sửa cho ground-truth check** (`calvin_experiment._clearance`): giờ dùng `robot_geometry.capsule_segments()` — 8 capsule (đoạn thẳng + bán kính) nối đủ 9 frame (0..8), phủ toàn bộ chiều dài tay. **CHƯA sửa cho `arm_reach.py`'s reachtube** (dùng bởi Certify step của shield thật) — vẫn chỉ check 4 điểm cũ. Đây là mismatch cần xử lý trước khi wiring shield thật vào CALVIN, đã flag rõ trong `arm_reach.py`'s docstring.
 - **Ngón tay (vượt ra ngoài flange) cũng bị bỏ sót ban đầu** (user hỏi tiếp: "objs đặt ngẫu nhiên không rơi vào phạm vi ngón tay à?"): obstacle được đặt tại vị trí TƯƠNG LAI của gripper (endpoint reach-tube), tay di chuyển dần tới đó — nhưng ngón tay thò ra PHÍA TRƯỚC flange theo đúng hướng di chuyển, nên chạm sớm hơn lúc flange (sphere gripper cũ, bán kính 0.05m) tới đủ gần để bị phát hiện → **under-count thật, không phải rủi ro thấp** (sửa lại nhận định ban đầu). Đã sửa: thêm `robot_geometry.gripper_tip_position()` (điểm TCP, cách flange đúng `GRIPPER_TIP_OFFSET=0.1m` dọc theo hướng flange đang chỉ — suy ra từ `panda.urdf`'s `tcp_joint`, không cần biết góc xoay trung gian vì tịnh tiến dọc trục z không bị ảnh hưởng bởi xoay quanh chính trục đó) + capsule flange→TCP, bán kính `GRIPPER_TIP_RADIUS=0.06` (0.04m độ mở ngón tay tối đa mỗi bên + 0.02m độ dày ngón tay, cận trên cố ý bảo toàn cho cả trường hợp gripper mở hết — không mô phỏng động trạng thái đóng/mở gripper).
 
+**✅ ĐÃ CHỐT: radius = 0.08m** — kết quả sweep thật, chạy trên checkpoint/dataset thật (n_sequences=100 mỗi radius, sau khi capsule-chain fix ở trên đã áp dụng):
+
+| radius | violation_rate | success_rate | avg_seq_len | clearance p10 | clearance min | min + radius |
+|---|---|---|---|---|---|---|
+| 0 (baseline, không obstacle) | — | 0.930 | 4.65/5 | — | — | — |
+| 0.02 | 0.076 | 0.704 | 3.52/5 | +0.0042 | -0.1289 | -0.1089 |
+| 0.05 | 0.108 | 0.586 | 2.93/5 | -0.0084 | -0.1589 | -0.1089 |
+| **0.08 (chốt)** | **0.128** | **0.482** | **2.41/5** | **-0.0286** | **-0.1889** | **-0.1089** |
+| 0.12 | 0.148 | 0.412 | 2.06/5 | -0.0732 | -0.2289 | -0.1089 |
+
+Nhận xét khi tune: (1) `min_clearance + radius` ra **đúng hằng số -0.1089 ở mọi radius** — vì rollout dừng ngay khi violated, nên "overshoot" tối đa chỉ phụ thuộc chuyển động 1 bước của policy, không phụ thuộc radius; xác nhận `_clearance()`/dừng-khi-violated hoạt động đúng thiết kế, không phải bug. (2) Không có floor effect ở 0.02 (violation_rate 7.6% đã là tín hiệu thật, không gần 0%) và chưa chạm ceiling ở 0.12 (14.8%, còn xa 100%) — toàn bộ range 0.02–0.12 đều "dùng được", 0.08 được chọn vì cân bằng: violation_rate đủ cao để shield có việc làm, success_rate còn 48.2% (chưa về 0, còn khoảng để shield show cải thiện). (3) success_rate giảm rất nhanh dù radius nhỏ (93%→70.4% chỉ với r=0.02) — do cấu trúc chained-sequence (1 subtask violated làm mất hết điểm các subtask sau trong `build_fixed_cohort_slots`), không phải bug, nhưng cần nhớ khi so sánh giữa CALVIN và LIBERO nếu LIBERO không chain task như vậy.
+
+Muốn sweep lại (checkpoint mới, hoặc muốn xem ceiling effect ở radius > 0.12): sửa `RADII_TO_SWEEP` trong `scripts/run_calvin_unshielded.py`.
+
 ### num_sequences / n_episodes — cỡ mẫu
 - **Không phải tham số đánh đổi chất lượng** — chỉ ảnh hưởng độ tin cậy thống kê của các metric đo được.
 - **Output cần theo dõi**: độ rộng của confidence interval (paper's own recipe: bootstrap 10^4 resamples) hoặc đơn giản là chạy lại với seed khác, xem các metric có dao động nhiều không.

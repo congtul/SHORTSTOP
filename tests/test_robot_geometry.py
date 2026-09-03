@@ -1,17 +1,18 @@
 import numpy as np
 
 from shortstop.robot_geometry import (
+    FLANGE_FRAME_INDEX,
+    FRAME_RADIUS,
     GRIPPER_TIP_OFFSET,
+    GRIPPER_TIP_RADIUS,
     LINK_RADIUS,
     N_JOINTS,
-    SPHERE_NAMES,
     capsule_segments,
     end_effector_jacobian,
     gripper_tip_position,
     numerical_jacobian,
     panda_frames,
     point_to_segment_distance,
-    sphere_centers,
 )
 
 
@@ -27,12 +28,23 @@ def test_panda_frames_returns_9_positions_and_flange_is_above_base():
     assert 0.3 < reach < 1.5
 
 
-def test_sphere_centers_matches_selected_frames():
+def test_flange_frame_index_names_the_last_panda_frame():
     q = np.random.default_rng(0).uniform(-0.5, 0.5, size=N_JOINTS)
     frames = panda_frames(q)
-    centers = sphere_centers(q)
-    assert centers.shape == (len(SPHERE_NAMES), 3)
-    assert np.allclose(centers[-1], frames[-1])  # last sphere == flange
+    assert FLANGE_FRAME_INDEX == len(frames) - 1
+    assert np.allclose(frames[FLANGE_FRAME_INDEX], frames[-1])
+
+
+def test_frame_radius_covers_all_9_frames_and_flange_includes_the_fingertip_reach():
+    assert len(FRAME_RADIUS) == 9
+    # every interior frame's radius is at least as big as its two
+    # adjacent links' own radii (frame sits at their junction)
+    for i in range(1, len(LINK_RADIUS)):
+        assert FRAME_RADIUS[i] >= LINK_RADIUS[i - 1]
+        assert FRAME_RADIUS[i] >= LINK_RADIUS[i]
+    # flange's radius must be big enough to cover the fingers reaching
+    # past it, not just link7's own thickness
+    assert FRAME_RADIUS[FLANGE_FRAME_INDEX] >= GRIPPER_TIP_OFFSET + GRIPPER_TIP_RADIUS
 
 
 def test_only_upstream_joints_affect_a_given_frame():
