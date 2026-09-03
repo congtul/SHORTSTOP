@@ -95,10 +95,18 @@ literature thật làm cho tay máy**. Đã tìm và trích dẫn cụ thể:
   tay**, không phải 1 điểm.
 
 Implementation ở đây: 4 sphere (elbow/forearm/wrist/gripper) theo forward-
-kinematics thật của Panda (`robot_geometry.py`, DH table modified-DH,
-verify một phần qua search — **cần đối chiếu lại với `franka_description`
-URDF thật trước khi tin dùng cho robot/sim thật**). Bán kính sphere (0.06–
-0.08m) là placeholder thô, chưa fit theo mesh collision thật.
+kinematics thật của Panda (`robot_geometry.py`, DH table modified-DH --
+**đã verify khớp với URDF thật của `mdt_policy/calvin_env`'s
+`franka_panda/panda.urdf`**, từng hàng DH đối chiếu đúng với `<origin>`
+của từng joint). Bán kính sphere (`SPHERE_RADII = [0.09, 0.10, 0.06,
+0.05]`) **đã đo từ mesh collision thật** (không còn placeholder) --
+phương pháp: max bán kính cắt ngang vuông góc trục dài nhất (SVD) của
+mesh link tương ứng, làm tròn lên cm. Xem chi tiết + số liệu thô trong
+comment ngay trên `SPHERE_RADII` (`robot_geometry.py`) và
+`docs/PARAMETERS_REFERENCE.md` mục 8. Vẫn còn thô ở khía cạnh khác: 1
+sphere/link không phủ hết chiều dài link, và link 1/2/4/6 không có
+sphere riêng -- coverage hình học vẫn đơn giản hơn ARMTD thật, chỉ có
+bán kính là đã chính xác vật lý.
 
 ## 5. Vì sao gộp CE-search + Repair thành 1 hàng ablation
 

@@ -30,10 +30,35 @@ shortstop.calvin_obstacle), and -- matching shortstop.env.ReachAvoid2D's
 instant it is violated, so `violated` and `reached` can never both be True
 for the same attempt (except the same-step edge case), and no attempt
 that entered X_u is ever counted as a success by continuing past it.
+
+Ground-truth collision check (_clearance) uses the *full-arm capsule
+chain* (robot_geometry.capsule_segments -- one capsule per link, link0
+through link7) plus a gripper-tip capsule (flange to
+robot_geometry.gripper_tip_position(), covering panda_hand + the fingers
+past the flange) -- NOT just the 4 named sphere points
+(elbow/forearm/wrist/gripper) alone. A collision partway along a link
+(elbow/forearm/wrist links are 0.14-0.35m long, far longer than their
+own point-sphere radius), on a link with no named sphere at all
+(link0/1/2/4/6), or at the fingertips (which point *ahead* of the flange
+in the direction of travel, past where a flange-centered sphere alone
+would ever detect anything) would be invisible to a sphere_centers()-
+only check. NOTE: shortstop.arm_reach's reachtube (used by the shield's
+own Certify step, once wired in) still uses only the 4 point-spheres --
+it has NOT been upgraded to capsules yet. Until it is, the shield would
+certify against a coarser geometry than this ground-truth check measures
+against, a real mismatch to fix before trusting a real
+shielded-vs-unshielded comparison on CALVIN.
 """
 import numpy as np
 
-from .robot_geometry import sphere_centers
+from .robot_geometry import (
+    GRIPPER_TIP_RADIUS,
+    capsule_segments,
+    gripper_tip_position,
+    panda_frames,
+    point_to_segment_distance,
+    sphere_centers,
+)
 
 ROBOT_OBS_RAW_JOINT_SLICE = slice(7, 14)
 
@@ -48,23 +73,36 @@ def _to_action_tensor(action_row):
 
 
 def _clearance(obs, obstacle):
-    """min over spheres of (distance to obstacle center - radius) -- signed:
-    <= 0 means violated (a sphere is inside or touching the obstacle), > 0
-    is how far the closest sphere is from the boundary. `None` if there is
-    no obstacle at all (nothing to measure clearance against). Used both
-    for the violation check itself and (see calvin_experiment's callers)
-    as a radius-tuning diagnostic: the *distribution* of this value over
-    many attempts shows whether a given radius is too small (clearance
-    rarely near 0, floor effect) or too large (deeply negative on most
-    attempts, ceiling effect) well before looking at the binary
-    violated/not-violated rate alone.
+    """min over (the flange->fingertip capsule, every one of the 8 link
+    capsules) of (distance to obstacle center - obstacle.radius - this
+    primitive's own radius) -- signed: <= 0 means violated (the arm's
+    *volume*, not just a handful of sample points, touches the
+    obstacle), > 0 is how far the closest surface is from the obstacle's
+    boundary. `None` if there is no obstacle at all (nothing to measure
+    clearance against).
+
+    See module docstring for why this checks the full capsule chain (not
+    just sphere_centers()'s 4 named points) -- a sphere/capsule is a
+    physical volume, and real collision happens at
+    center/axis-distance <= obstacle.radius + the primitive's own radius;
+    omitting either the arm's thickness, the *length* of a link between
+    its two named endpoints, or the fingers reaching out past the flange
+    would under-count real risk.
     """
     if obstacle is None:
         return None
     joint_angles = _joint_angles_from_obs(obs)
-    centers = sphere_centers(joint_angles)
-    distances = np.linalg.norm(centers - obstacle.center, axis=1)
-    return float(np.min(distances) - obstacle.radius)
+
+    flange = panda_frames(joint_angles)[-1]
+    tip = gripper_tip_position(joint_angles)
+    d = point_to_segment_distance(obstacle.center, flange, tip)
+    clearances = [d - obstacle.radius - GRIPPER_TIP_RADIUS]
+
+    for point_a, point_b, link_radius in capsule_segments(joint_angles):
+        d = point_to_segment_distance(obstacle.center, point_a, point_b)
+        clearances.append(d - obstacle.radius - link_radius)
+
+    return float(min(clearances))
 
 
 def _lang_goal(lang_embeddings, val_annotations, subtask):
