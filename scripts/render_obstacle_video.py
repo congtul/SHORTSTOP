@@ -65,11 +65,12 @@ N_SUBTASKS = 5
 
 OBSTACLE_RADIUS = 0.08  # chosen default, see docs/PARAMETERS_REFERENCE.md muc 1's "radius" sweep table
 
-# MUST match run_calvin_unshielded.py's own REPLAN_STEPS (=5, ratio 0.5
-# against act_window_size=10, chosen 2026-09-04) -- see that script's
-# comment. Not cfg.multistep: that hydra knob only feeds MDTVAgent.
-# step()'s internal counter, never called here (see _ForwardOnlyPolicy).
-REPLAN_STEPS = 5
+# MUST match run_calvin_unshielded.py's own REPLAN_STEPS (=10, ratio 1.0
+# against act_window_size=10 -- see that script's comment for why a
+# smaller ratio was tried and reverted 2026-09-04). Not cfg.multistep:
+# that hydra knob only feeds MDTVAgent.step()'s internal counter, never
+# called here (see _ForwardOnlyPolicy).
+REPLAN_STEPS = 10
 
 # Which curated eval sequences (get_sequences()'s own idx, 0-based) to try.
 # The obstacle is placed right on the path of the chunk about to be

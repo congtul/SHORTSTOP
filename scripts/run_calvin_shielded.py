@@ -76,17 +76,20 @@ N_CANDIDATES = 8
 # Replan cadence -- MUST match scripts/run_calvin_unshielded.py's own
 # REPLAN_STEPS exactly (same reasoning: pure harness-level chunk slicing,
 # not a model property, see that script's comment) for the unshielded-
-# vs-shielded comparison to stay apples-to-apples. =5 (ratio 0.5 against
-# act_window_size=10), chosen 2026-09-04 -- see docs/PARAMETERS_
-# REFERENCE.md's "multistep / replan_steps" entry.
-REPLAN_STEPS = 5
+# vs-shielded comparison to stay apples-to-apples. Tried =5 (ratio 0.5,
+# Diffusion Policy convention) on 2026-09-04, reverted same day: real
+# sweep showed a ~10pp baseline success_rate cost from more frequent
+# replanning alone (independent noise per propose() call = more "seams"
+# between chunks), with no corresponding benefit for Conf-Thresh (its
+# filter frequency is tied to policy frequency regardless -- see docs/
+# PARAMETERS_REFERENCE.md's "multistep / replan_steps" entry for the
+# full writeup). Back to =10 (ratio 1.0, matching act_window_size).
+REPLAN_STEPS = 10
 
-# Obstacle radius -- NEEDS RE-TUNE (2026-09-04): the 0.08 value was
-# chosen at REPLAN_STEPS=10 (see scripts/run_calvin_unshielded.py's own
-# RADII_TO_SWEEP comment); changing REPLAN_STEPS changes the unshielded
-# baseline's own realized trajectories, invalidating that sweep. Re-run
-# run_calvin_unshielded.py's full RADII_TO_SWEEP at REPLAN_STEPS=5 first
-# and update this to whatever it picks before trusting this baseline.
+# Obstacle radius: already tuned at this same REPLAN_STEPS=10, see
+# docs/PARAMETERS_REFERENCE.md / scripts/run_calvin_unshielded.py's own
+# RADII_TO_SWEEP comment. Re-tune there (not here) if the checkpoint/
+# dataset or REPLAN_STEPS ever change again.
 OBSTACLE_RADIUS = 0.08
 
 # Candidate disagreement_threshold values to sweep (meters, same units as

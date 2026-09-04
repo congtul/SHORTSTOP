@@ -100,33 +100,45 @@ from shortstop.mdt_policy_client import ForwardOnlyPolicy  # noqa: E402
 # harness-level slicing choice (chunk[:REPLAN_STEPS] inside
 # run_calvin_unshielded_sequence), NOT a model/checkpoint property, so
 # changing it needs no retraining (see docs/PARAMETERS_REFERENCE.md's
-# "multistep / replan_steps" entry). =5 (ratio 0.5 against act_window_
-# size=10) chosen 2026-09-04, matching Diffusion Policy's (Chi et al.,
-# RSS 2023) own Ta=8/Tp=16 execution/prediction ratio -- NOT `cfg.
-# multistep` (that hydra knob only feeds MDTVAgent.step()'s own internal
-# counter, which this harness never calls; see ForwardOnlyPolicy's
-# docstring on calling forward() directly instead of step()).
-REPLAN_STEPS = 5
+# "multistep / replan_steps" entry). NOT `cfg.multistep` (that hydra knob
+# only feeds MDTVAgent.step()'s own internal counter, which this harness
+# never calls; see ForwardOnlyPolicy's docstring on calling forward()
+# directly instead of step()).
+#
+# Tried =5 (ratio 0.5 against act_window_size=10, matching Diffusion
+# Policy's Ta=8/Tp=16 execution/prediction ratio) on 2026-09-04, reverted
+# same day: real sweep on this checkpoint showed the "without obstacle"
+# baseline success_rate drop from 0.930 (REPLAN_STEPS=10) to 0.834
+# (REPLAN_STEPS=5) -- a ~10pp cost from more frequent replanning alone,
+# before any obstacle. Each propose() call draws fresh independent noise
+# (no continuity with the previous chunk), so replanning more often means
+# more "seams" between independently-sampled chunks -- exactly why
+# Diffusion Policy's own ablation didn't pick the smallest possible Ta
+# either. That 0.5 ratio doesn't transfer to this checkpoint, and nothing
+# in this project currently benefits from more frequent replanning
+# (Conf-Thresh's filter frequency is tied to policy frequency either way,
+# and no baseline with a decouplable certify step exists yet -- see
+# docs/PARAMETERS_REFERENCE.md's decoupling-feasibility table) enough to
+# justify paying that cost. Back to =10 (ratio 1.0).
+REPLAN_STEPS = 10
 
 # Candidate obstacle radii to sweep (meters) -- edit this list directly
 # while tuning; no config knob for it yet since we're still narrowing the
 # range by hand, see module docstring.
 #
-# NEEDS RE-SWEEP (2026-09-04): the table below was measured at
-# REPLAN_STEPS=10 (== act_window_size, ratio 1.0) -- changing REPLAN_STEPS
-# to 5 changes the realized trajectory (a fresh chunk gets sampled from
-# the real state at step 5 instead of blindly running steps 5-9 of the
-# old chunk), so these numbers no longer apply. Re-run the full sweep
-# below before trusting a radius again.
-#
-# STALE (real run, n_sequences=100, REPLAN_STEPS=10, checkpoint/dataset
-# per docs/CALVIN_SETUP.md): swept [0.02, 0.05, 0.08, 0.12] -> violation_
-# rate 0.076/0.108/0.128/0.148, success_rate 0.704/0.586/0.482/0.412
-# (baseline without obstacle: 0.930). No floor effect at 0.02, no ceiling
-# effect by 0.12 -- full table + reasoning in docs/PARAMETERS_REFERENCE.md
-# muc 1's "radius" entry. Chose r=0.08 under REPLAN_STEPS=10 -- treat as
-# a starting guess for the new sweep, not a re-confirmed value.
-RADII_TO_SWEEP = [0.02, 0.05, 0.08, 0.12]
+# TUNED (real run, n_sequences=100, REPLAN_STEPS=10, checkpoint/dataset per
+# docs/CALVIN_SETUP.md): swept [0.02, 0.05, 0.08, 0.12] -> violation_rate
+# 0.076/0.108/0.128/0.148, success_rate 0.704/0.586/0.482/0.412 (baseline
+# without obstacle: 0.930). No floor effect at 0.02 (violation_rate
+# already meaningfully nonzero), no ceiling effect reached by 0.12
+# (nowhere near 100%) -- full table + the min_clearance+radius=const
+# sanity-check finding in docs/PARAMETERS_REFERENCE.md muc 1's "radius"
+# entry. CHOSE r=0.08 as the default (shortstop.calvin_obstacle.
+# sample_obstacle_from_reference_chunk's own default arg) -- balances a
+# meaningful violation_rate against still leaving success_rate well
+# above 0 for a shield to visibly improve. Re-sweep (edit this list) if
+# the checkpoint/dataset or REPLAN_STEPS ever change again.
+RADII_TO_SWEEP = [0.08]
 
 # Resuming a killed/interrupted run: trim RADII_TO_SWEEP above to just the
 # radii not yet completed (check the previous run's run.log), and flip
