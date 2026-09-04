@@ -105,6 +105,14 @@ OBSTACLE_RADIUS = 0.08
 # activation move. Only read in --tuning mode.
 THRESHOLDS_TO_SWEEP = [0.15, 0.35, 0.6, 0.9]
 
+# Skip Phase 1 (disagreement_threshold=inf diagnostic) in --tuning runs --
+# it's fully deterministic given the same cohort/checkpoint/K/radius/
+# REPLAN_STEPS, so re-running it just reproduces the same percentiles
+# already used to pick THRESHOLDS_TO_SWEEP above (real numbers logged
+# there). Flip back to True if K/radius/REPLAN_STEPS/checkpoint change
+# and the percentiles need refreshing.
+RUN_DIAGNOSTIC = False
+
 # Final, already-chosen threshold -- PLACEHOLDER until the tuning pass
 # above actually picks tau*. Only read in eval mode (no --tuning flag).
 CHOSEN_THRESHOLD = 0.05
@@ -383,17 +391,26 @@ def main(cfg):
         # select() still runs Select-by-g(a) among all K (a genuine
         # "select-only" row, not equivalent to unshielded). Disagreement
         # values from this same pass are logged as percentiles to inform
-        # THRESHOLDS_TO_SWEEP.
-        label = "select-only (disagreement_threshold=inf)"
-        disagreement_samples = []
-        shield = ArmConfThreshShield(disagreement_threshold=float("inf"), replan_steps=REPLAN_STEPS)
-        entry = _run_one_threshold(
-            label, shield, float("inf"), env, policy, task_oracle, lang_embeddings, val_annotations,
-            get_env_state_for_initial_condition, eval_sequences, cfg, SEQUENCE_SEED_BASE,
-            disagreement_sink=disagreement_samples,
-        )
-        results.append(entry)
-        _log_disagreement_debug(label, _disagreement_percentiles(disagreement_samples))
+        # THRESHOLDS_TO_SWEEP. Fully deterministic given the same cohort/
+        # checkpoint/K/radius/REPLAN_STEPS (seed_everything reseeds every
+        # sequence identically) -- re-running it just reproduces the same
+        # numbers, so RUN_DIAGNOSTIC skips it once its percentiles are
+        # already known (see THRESHOLDS_TO_SWEEP's own comment for the
+        # real numbers this run already produced on 2026-09-05: mean=
+        # 0.368 median=0.349 p10=0.146 p90=0.609 p99=0.906). Flip back to
+        # True only if K/radius/REPLAN_STEPS/checkpoint change again and
+        # the percentiles need refreshing.
+        if RUN_DIAGNOSTIC:
+            label = "select-only (disagreement_threshold=inf)"
+            disagreement_samples = []
+            shield = ArmConfThreshShield(disagreement_threshold=float("inf"), replan_steps=REPLAN_STEPS)
+            entry = _run_one_threshold(
+                label, shield, float("inf"), env, policy, task_oracle, lang_embeddings, val_annotations,
+                get_env_state_for_initial_condition, eval_sequences, cfg, SEQUENCE_SEED_BASE,
+                disagreement_sink=disagreement_samples,
+            )
+            results.append(entry)
+            _log_disagreement_debug(label, _disagreement_percentiles(disagreement_samples))
 
         # Phase 2: sweep -- pick tau* from these once real numbers are in.
         for threshold in THRESHOLDS_TO_SWEEP:
