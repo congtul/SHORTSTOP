@@ -6,6 +6,62 @@ Không lặp lại nội dung tham số (xem `docs/PARAMETERS_REFERENCE.md`) —
 
 ---
 
+## 0. Quy tắc cohort tuning/eval — áp dụng cho MỌI tham số, mọi lần tune sau này
+
+Mọi lần tune 1 tham số bằng cách chạy nhiều giá trị trên 1 tập sequence rồi
+chọn giá trị "tốt nhất" (radius, `disagreement_threshold`, `epsilon`,
+`model_error`, ...) **phải tách 2 cohort disjoint**, quy ước cố định:
+
+- **Tuning cohort: sequence idx 0..N-1** (mặc định N=100 — `get_sequences(2*N)[0:N]`,
+  tương đương `SEQUENCE_SEED_BASE=1000` + idx 0..99 đã dùng từ trước). Dùng
+  cho *mọi* vòng sweep/so sánh giá trị, và cho diagnostic pass nếu có — chọn
+  ra giá trị cuối (τ*, radius*, ...) ở đây.
+- **Eval cohort: sequence idx N..2N-1 ("100..199")** — disjoint với tuning
+  cohort, chạy **đúng 1 lần** với giá trị đã chốt, số ra từ lần chạy này mới
+  là số "final" để report/đưa vào paper. Không chọn lại giá trị dựa trên số
+  ở eval cohort — nếu eval cho kết quả không ổn, đó là tín hiệu để nghĩ lại
+  cách tune, không phải để nhích giá trị cho đẹp số (nhích vậy biến eval
+  thành tuning, mất hết ý nghĩa tách cohort).
+
+**Lý do có quy tắc này (rút từ 1 lần đã lỡ không làm)**: bộ sweep radius=0.08
+(mục 6 dưới, đã chốt *trước khi* quy tắc này được đặt ra) chọn giá trị VÀ
+report số cuối trên **cùng 100 sequence** — không sai về code/logic (số tính
+đúng), nhưng có thiên lệch optimistic nhẹ do tuning-on-eval leakage. Mức độ
+lệch có thể nhỏ (radius chỉ chọn giữa 4 giá trị rời rạc theo tiêu chí định
+tính, không phải tối ưu số liệu chặt) nhưng về nguyên tắc không nên gọi đó là
+số "final unbiased". Muốn số radius=0.08 sạch hoàn toàn cần 1 lần chạy xác
+nhận riêng trên idx 100..199 — chưa làm, follow-up optional, không chặn việc
+khác.
+
+Từ giờ mọi tham số mới đều theo quy tắc 2 cohort này ngay từ đầu —
+`disagreement_threshold` của `ArmConfThreshShield` (Conf-Thresh baseline) là
+tham số đầu tiên áp dụng đúng theo quy tắc này.
+
+**Cơ chế CLI cụ thể (đã implement trong `scripts/run_calvin_unshielded.py`,
+áp dụng cho MỌI script sau này có cơ chế sweep tham số — không cần cho
+script chỉ chạy 1 lần như `render_obstacle_video.py`)**:
+
+```bash
+python scripts/run_calvin_unshielded.py            # không flag -> eval cohort (mặc định)
+python scripts/run_calvin_unshielded.py --tuning    # tuning cohort
+```
+
+Implementation pattern (copy nguyên cho script mới):
+```python
+TUNING_MODE = "--tuning" in sys.argv   # pop ra khỏi sys.argv TRƯỚC khi hydra.main() parse,
+if TUNING_MODE:                          # vì hydra chỉ hiểu key=value, --tuning lạ sẽ làm hydra lỗi
+    sys.argv.remove("--tuning")
+...
+N = cfg.num_sequences
+COHORT_OFFSET = 0 if TUNING_MODE else N
+eval_sequences = get_sequences(2 * N)[COHORT_OFFSET:COHORT_OFFSET + N]
+SEQUENCE_SEED_BASE = 1000 + COHORT_OFFSET   # tránh 2 cohort trùng seed
+```
+`RUN_OUTPUT_DIR` nên gắn suffix `_tuning`/`_eval`, và `results.json` nên ghi
+`tuning_mode`/`cohort_sequence_idx_range` để không nhầm khi đọc lại sau.
+
+---
+
 ## 1. Trình tự đã đi qua cho CALVIN (làm lại y vậy cho LIBERO)
 
 1. **Xác nhận I/O contract thật** của policy + env bằng cách đọc code thật (không đoán) — action space, obs keys, cách gọi model đúng (CALVIN: `MDTVAgent.forward()` không phải `.step()`, xem `shortstop/mdt_policy_client.py`'s docstring).

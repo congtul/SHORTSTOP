@@ -15,7 +15,18 @@ in; treat this as a carefully-reasoned first draft to debug against the
 real checkout, not a guaranteed-working script):
 
     cd SHORTSTOP
-    python scripts/run_calvin_unshielded.py
+    python scripts/run_calvin_unshielded.py            # eval cohort (default)
+    python scripts/run_calvin_unshielded.py --tuning    # tuning cohort
+
+Tuning/eval cohort split (see docs/TUNING_WORKFLOW.md muc 0 -- applies to
+every swept parameter in this repo, not just radius): sequence idx
+0..N-1 is the TUNING cohort (pick RADII_TO_SWEEP's final value here),
+idx N..2N-1 is a disjoint EVAL cohort, meant to be run exactly once with
+that already-chosen value for the number that actually gets
+reported -- never re-picked based on the eval run's own numbers. Default
+(no flag) is eval, since RADII_TO_SWEEP is normally already narrowed to
+the one chosen value by the time this script gets run; pass `--tuning`
+only while still sweeping candidate values.
 
 Reuses mdt_evaluate.py's own model/env setup (`get_default_beso_and_env`
 + the same sampler/EMA overrides `main()` applies) rather than
@@ -60,6 +71,15 @@ import hydra
 import numpy as np
 from pytorch_lightning import seed_everything
 
+# Popped out of sys.argv here, before hydra.main() ever parses it (hydra's
+# own CLI only understands `key=value` overrides and a handful of reserved
+# `--` flags -- an unrecognized `--tuning` would otherwise make hydra error
+# out). See module docstring's "Tuning/eval cohort split" for what this
+# controls.
+TUNING_MODE = "--tuning" in sys.argv
+if TUNING_MODE:
+    sys.argv.remove("--tuning")
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MDT_POLICY_ROOT = REPO_ROOT / "mdt_policy"
 sys.path.insert(0, str(REPO_ROOT))
@@ -73,24 +93,40 @@ from shortstop.calvin_experiment import run_calvin_unshielded_sequence  # noqa: 
 from shortstop.calvin_metrics import build_fixed_cohort_slots, fixed_cohort_rates  # noqa: E402
 from shortstop.calvin_obstacle import sample_obstacle_from_reference_chunk  # noqa: E402
 from shortstop.calvin_obstacle_viz import save_sequence_video  # noqa: E402
+from shortstop.mdt_policy_client import ForwardOnlyPolicy  # noqa: E402
+
+# Replan cadence: how many rows of each proposed (act_window_size=10)
+# chunk actually get executed before propose() is called again -- a pure
+# harness-level slicing choice (chunk[:REPLAN_STEPS] inside
+# run_calvin_unshielded_sequence), NOT a model/checkpoint property, so
+# changing it needs no retraining (see docs/PARAMETERS_REFERENCE.md's
+# "multistep / replan_steps" entry). =5 (ratio 0.5 against act_window_
+# size=10) chosen 2026-09-04, matching Diffusion Policy's (Chi et al.,
+# RSS 2023) own Ta=8/Tp=16 execution/prediction ratio -- NOT `cfg.
+# multistep` (that hydra knob only feeds MDTVAgent.step()'s own internal
+# counter, which this harness never calls; see ForwardOnlyPolicy's
+# docstring on calling forward() directly instead of step()).
+REPLAN_STEPS = 5
 
 # Candidate obstacle radii to sweep (meters) -- edit this list directly
 # while tuning; no config knob for it yet since we're still narrowing the
 # range by hand, see module docstring.
 #
-# TUNED (real run, n_sequences=100, checkpoint/dataset per docs/CALVIN_SETUP.md):
-# swept [0.02, 0.05, 0.08, 0.12] -> violation_rate 0.076/0.108/0.128/0.148,
-# success_rate 0.704/0.586/0.482/0.412 (baseline without obstacle: 0.930).
-# No floor effect at 0.02 (violation_rate already meaningfully nonzero), no
-# ceiling effect reached by 0.12 (nowhere near 100%) -- full table + the
-# min_clearance+radius=const sanity-check finding in
-# docs/PARAMETERS_REFERENCE.md muc 1's "radius" entry. CHOSE r=0.08 as the
-# default (shortstop.calvin_obstacle.sample_obstacle_from_reference_chunk's
-# own default arg) -- balances a meaningful violation_rate against still
-# leaving success_rate well above 0 for a shield to visibly improve.
-# Re-sweep (edit this list) if the checkpoint/dataset ever changes, or to
-# see where ceiling effect kicks in above 0.12 (not yet explored).
-RADII_TO_SWEEP = [0.08]
+# NEEDS RE-SWEEP (2026-09-04): the table below was measured at
+# REPLAN_STEPS=10 (== act_window_size, ratio 1.0) -- changing REPLAN_STEPS
+# to 5 changes the realized trajectory (a fresh chunk gets sampled from
+# the real state at step 5 instead of blindly running steps 5-9 of the
+# old chunk), so these numbers no longer apply. Re-run the full sweep
+# below before trusting a radius again.
+#
+# STALE (real run, n_sequences=100, REPLAN_STEPS=10, checkpoint/dataset
+# per docs/CALVIN_SETUP.md): swept [0.02, 0.05, 0.08, 0.12] -> violation_
+# rate 0.076/0.108/0.128/0.148, success_rate 0.704/0.586/0.482/0.412
+# (baseline without obstacle: 0.930). No floor effect at 0.02, no ceiling
+# effect by 0.12 -- full table + reasoning in docs/PARAMETERS_REFERENCE.md
+# muc 1's "radius" entry. Chose r=0.08 under REPLAN_STEPS=10 -- treat as
+# a starting guess for the new sweep, not a re-confirmed value.
+RADII_TO_SWEEP = [0.02, 0.05, 0.08, 0.12]
 
 # Resuming a killed/interrupted run: trim RADII_TO_SWEEP above to just the
 # radii not yet completed (check the previous run's run.log), and flip
@@ -101,7 +137,8 @@ RADII_TO_SWEEP = [0.08]
 # from-scratch run.
 INCLUDE_WITHOUT_OBSTACLE = True
 
-RUN_OUTPUT_DIR = REPO_ROOT / "outputs" / "calvin_unshielded_runs" / f"run_{datetime.now():%Y%m%d_%H%M%S}"
+_COHORT_TAG = "tuning" if TUNING_MODE else "eval"
+RUN_OUTPUT_DIR = REPO_ROOT / "outputs" / "calvin_unshielded_runs" / f"run_{datetime.now():%Y%m%d_%H%M%S}_{_COHORT_TAG}"
 VIS_OUTPUT_DIR = RUN_OUTPUT_DIR / "videos"
 
 _LOG_FILE = None  # opened at the top of main(), see _log()
@@ -182,7 +219,7 @@ def _save_debug_videos(
     seed_everything(sequence_seed_base + sequence_idx, workers=True)
     attempts = run_calvin_unshielded_sequence(
         env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
-        get_env_state_for_initial_condition, ep_len=cfg.ep_len, replan_steps=cfg.multistep,
+        get_env_state_for_initial_condition, ep_len=cfg.ep_len, replan_steps=REPLAN_STEPS,
         obstacle_fn=obstacle_fn, record_trajectory=True, record_camera_frames=True,
     )
     VIS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -213,31 +250,15 @@ def _save_debug_videos(
     return [str(out_path.relative_to(RUN_OUTPUT_DIR))]
 
 
-class _ForwardOnlyPolicy:
-    """Adapter around the loaded MDTVAgent: `.propose(observation)` calls
-    `model(obs, goal)` (forward(), not step() -- see
-    shortstop/mdt_policy_client.py's docstring for why) `n_candidates`
-    times, returning raw numpy chunks."""
-
-    def __init__(self, model, n_candidates=1):
-        self.model = model
-        self.n_candidates = n_candidates
-
-    def propose(self, observation):
-        goal = observation["goal"]
-        return [
-            np.asarray(self.model(observation, goal).squeeze(0).detach().cpu())
-            for _ in range(self.n_candidates)
-        ]
-
-
 @hydra.main(config_path="../mdt_policy/conf", config_name="mdt_evaluate")
 def main(cfg):
     global _LOG_FILE
     RUN_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     _LOG_FILE = open(RUN_OUTPUT_DIR / "run.log", "w", encoding="utf-8")
     _log(f"[run] writing log + results.json (+ videos/ if any) to: {RUN_OUTPUT_DIR}")
-    _log(f"[run] config: num_sequences={cfg.num_sequences} ep_len={cfg.ep_len} multistep={cfg.multistep} "
+    _log(f"[run] cohort: {'TUNING (idx 0..N-1)' if TUNING_MODE else 'EVAL (idx N..2N-1)'} "
+         f"-- pass --tuning to switch (see docs/TUNING_WORKFLOW.md muc 0)")
+    _log(f"[run] config: num_sequences={cfg.num_sequences} ep_len={cfg.ep_len} replan_steps={REPLAN_STEPS} "
          f"sampler_type={cfg.sampler_type} num_sampling_steps={cfg.num_sampling_steps} debug={cfg.debug}")
 
     seed_everything(0, workers=True)
@@ -249,7 +270,11 @@ def main(cfg):
     )
     model.num_sampling_steps = cfg.num_sampling_steps
     model.sampler_type = cfg.sampler_type
-    model.multistep = cfg.multistep
+    # NOT model.multistep = cfg.multistep: that attribute only gates
+    # MDTVAgent.step()'s own internal replan counter, which this harness
+    # never calls (ForwardOnlyPolicy calls forward() directly) -- setting
+    # it would be dead code and could mislead a future reader into
+    # thinking it controls this harness's own REPLAN_STEPS above.
     if cfg.sigma_min is not None:
         model.sigma_min = cfg.sigma_min
     if cfg.sigma_max is not None:
@@ -260,9 +285,15 @@ def main(cfg):
 
     task_oracle = hydra.utils.instantiate(cfg.tasks)
     val_annotations = cfg.annotations
-    policy = _ForwardOnlyPolicy(model, n_candidates=1)
+    policy = ForwardOnlyPolicy(model, n_candidates=1)
 
-    eval_sequences = get_sequences(cfg.num_sequences)
+    # Tuning cohort = idx 0..N-1, eval cohort = idx N..2N-1, disjoint --
+    # see module docstring / docs/TUNING_WORKFLOW.md muc 0. COHORT_OFFSET
+    # shifts both the sequence slice and the seed range so the two cohorts
+    # never reuse the same (sequence, seed) pair.
+    N = cfg.num_sequences
+    COHORT_OFFSET = 0 if TUNING_MODE else N
+    eval_sequences = get_sequences(2 * N)[COHORT_OFFSET:COHORT_OFFSET + N]
 
     # Reseeded identically per sequence index in *both* branches below (not
     # just once at the top of main()) so that, for a given sequence, the
@@ -271,7 +302,10 @@ def main(cfg):
     # otherwise the two branches are just two independent stochastic
     # rollouts and "with <= without" would only hold statistically over
     # many sequences, not per-sequence as the comparison is meant to show.
-    SEQUENCE_SEED_BASE = 1000
+    # Offset by COHORT_OFFSET too so eval's seeds (1100..1199) never
+    # collide with tuning's (1000..1099), even though both loops below
+    # count their own local idx from 0.
+    SEQUENCE_SEED_BASE = 1000 + COHORT_OFFSET
 
     labels_and_obstacle_fns = ([("without obstacle", None, None)] if INCLUDE_WITHOUT_OBSTACLE else []) + [
         (
@@ -290,7 +324,7 @@ def main(cfg):
             seed_everything(SEQUENCE_SEED_BASE + idx, workers=True)
             attempts = run_calvin_unshielded_sequence(
                 env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
-                get_env_state_for_initial_condition, ep_len=cfg.ep_len, replan_steps=cfg.multistep,
+                get_env_state_for_initial_condition, ep_len=cfg.ep_len, replan_steps=REPLAN_STEPS,
                 obstacle_fn=obstacle_fn,
             )
             sequence_results.append(attempts)
@@ -340,7 +374,12 @@ def main(cfg):
 
     results_path = RUN_OUTPUT_DIR / "results.json"
     with open(results_path, "w", encoding="utf-8") as f:
-        json.dump({"radii_to_sweep": RADII_TO_SWEEP, "results": results}, f, indent=2)
+        json.dump({
+            "tuning_mode": TUNING_MODE,
+            "cohort_sequence_idx_range": [COHORT_OFFSET, COHORT_OFFSET + N],
+            "radii_to_sweep": RADII_TO_SWEEP,
+            "results": results,
+        }, f, indent=2)
     _log(f"[run] wrote structured results to: {results_path}")
     _log(f"[run] DONE -- zip up {RUN_OUTPUT_DIR} and send it back for tuning analysis")
     _LOG_FILE.close()

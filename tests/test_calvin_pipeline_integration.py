@@ -8,7 +8,7 @@ since CALVIN shares LIBERO's 7D relative-chunk convention and Panda robot
 import numpy as np
 
 from shortstop.arm_reach import propagate_arm_tube
-from shortstop.arm_shield import ArmRepairShield
+from shortstop.arm_shield import ArmConfThreshShield, ArmRepairShield
 from shortstop.env import Obstacle
 from shortstop.mdt_policy_client import MockMDTPolicyClient
 from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS
@@ -39,3 +39,24 @@ def test_full_propose_reach_certify_repair_loop_on_synthetic_candidates():
     assert action.shape == (10, 7)
     assert len(info["admissible_mask"]) == len(candidates)
     assert (not all(info["admissible_mask"])) or info["repair_attempted"] or info["fallback"]
+
+
+def test_full_propose_select_loop_with_conf_thresh_shield_on_synthetic_candidates():
+    """Conf-Thresh's own P-R-C-S variant: no Reach/obstacle knowledge at
+    all, disagreement-filter -> Select instead of tube-vs-obstacle
+    Certify -> Repair (see shortstop.arm_shield.ArmConfThreshShield)."""
+    rng = np.random.default_rng(0)
+    q = np.zeros(N_JOINTS)
+    policy = MockMDTPolicyClient(horizon=10, action_dim=7, n_candidates=8, noise_std=0.05, rng=rng)
+
+    candidates = policy.propose(observation={})  # Propose
+    assert len(candidates) == 8
+
+    shield = ArmConfThreshShield(disagreement_threshold=10.0, replan_steps=10)  # generous: exercises wiring, not exact filtering
+    scores = list(range(len(candidates)))
+    action, info = shield.select(q, candidates, scores)  # disagreement-filter -> Select
+
+    assert action.shape == (10, 7)
+    assert len(info["admissible_mask"]) == len(candidates)
+    assert len(info["disagreement"]) == len(candidates)
+    assert not info["fallback"]  # threshold generous enough that at least one candidate is admissible

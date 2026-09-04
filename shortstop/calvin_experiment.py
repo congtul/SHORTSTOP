@@ -1,6 +1,10 @@
-"""Unshielded rollout harness for CALVIN (Stage 7b) -- Propose -> execute
-directly, no Certify/Repair. Used to measure the *baseline* risk exposure
-(violation_rate, success_rate) that a shield would need to improve on.
+"""Rollout harnesses for CALVIN (Stage 7b/8). `run_calvin_unshielded_*`:
+Propose -> execute directly, no Certify/Select -- measures the *baseline*
+risk exposure (violation_rate, success_rate) a shield would need to
+improve on. `run_calvin_shielded_*`: Propose -> Certify/Select via a
+caller-supplied `shortstop.arm_shield` shield (Stage 8) -- see that
+function's own docstring for the gripper-fallback fix this harness layer
+adds on top of the shield's generic `np.zeros_like` fallback.
 
 Interface confirmed by reading the real, installed `mdt_policy` checkout
 (`mdt/wrappers/hulc_wrapper.py`, `mdt/evaluation/mdt_evaluate.py`'s
@@ -48,6 +52,7 @@ per-point-box (vs. exact capsule) approximation that remains there.
 """
 import numpy as np
 
+from .calvin_progress import calvin_progress_scores
 from .robot_geometry import (
     GRIPPER_TIP_RADIUS,
     capsule_segments,
@@ -57,10 +62,15 @@ from .robot_geometry import (
 )
 
 ROBOT_OBS_RAW_JOINT_SLICE = slice(7, 14)
+ROBOT_OBS_RAW_GRIPPER_INDEX = 14
 
 
 def _joint_angles_from_obs(obs):
     return obs["robot_obs_raw"].detach().cpu().numpy()[ROBOT_OBS_RAW_JOINT_SLICE]
+
+
+def _gripper_action_from_obs(obs):
+    return float(obs["robot_obs_raw"].detach().cpu().numpy()[ROBOT_OBS_RAW_GRIPPER_INDEX])
 
 
 def _to_action_tensor(action_row):
@@ -270,6 +280,154 @@ def run_calvin_unshielded_sequence(
     for subtask in eval_sequence:
         result = run_calvin_unshielded_subtask(
             env, policy, task_oracle, lang_embeddings, subtask, val_annotations,
+            ep_len=ep_len, replan_steps=replan_steps, obstacle_fn=obstacle_fn,
+            record_trajectory=record_trajectory, record_camera_frames=record_camera_frames,
+        )
+        attempts.append(result)
+        if not result["reached"]:
+            break
+    return attempts
+
+
+def run_calvin_shielded_subtask(
+    env, policy, task_oracle, lang_embeddings, subtask, val_annotations, shield,
+    ep_len=360, replan_steps=10, obstacle_fn=None, record_trajectory=False,
+    record_camera_frames=False,
+):
+    """One subtask attempt, shielded: `policy.propose(...)`'s K candidates
+    are scored by `shortstop.calvin_progress.calvin_progress_scores()`
+    (g(a), a kinematic goal-distance proxy -- see that module) and routed
+    through `shield.select(joint_angles, candidates, scores)` (see
+    shortstop.arm_shield's Arm*Shield classes) instead of always executing
+    `candidates[0]` directly the way run_calvin_unshielded_subtask does.
+
+    `policy.propose(...)` should return K>1 candidates for the shield's
+    filter to have anything to filter (e.g. `_ForwardOnlyPolicy(model,
+    n_candidates=8)`, matching the paper's own K=8) -- K=1 degenerates to
+    always executing that one candidate whether or not the shield's own
+    filter would reject it, same as every Arm*Shield's own fallback-to-
+    zero behavior when nothing else passes.
+
+    Obstacle placement still keys off `candidates[0]` specifically, not
+    whichever candidate the shield selects -- this is what keeps the
+    injected obstacle identical to the one run_calvin_unshielded_subtask
+    would place for the same seed, so "did the shield's choice avoid the
+    same test obstacle an unshielded run would have hit" stays a fair,
+    apples-to-apples comparison instead of a moving target that reacts to
+    the shield's own decision.
+
+    Gripper-fallback fix: `shield.select()`'s fallback action is
+    `np.zeros_like(candidates[0])`, meant as "freeze in place" -- but
+    `HulcWrapper.step()` (mdt/wrappers/hulc_wrapper.py) binarizes the
+    gripper column unconditionally (`1 if x > 0 else -1`), so a raw 0.0
+    would always read as "close," never "no-op." Whenever
+    `shield_info["fallback"]` is True, the executed chunk's gripper
+    column is overwritten with the real current gripper_action
+    (`obs["robot_obs_raw"][14]`) before stepping, so a fallback actually
+    holds the gripper instead of silently forcing it shut.
+
+    Returns everything run_calvin_unshielded_subtask returns, plus
+    'n_decisions' (how many replan cycles this subtask took) and
+    'n_activated' (how many of those decisions had the shield reject at
+    least one candidate, i.e. `not all(shield_info["admissible_mask"])` --
+    covers both partial rejection and total fallback). Feed these into a
+    *pooled* shield-activation-rate (sum(n_activated)/sum(n_decisions)
+    across every attempted subtask, not a mean of per-subtask rates -- see
+    docs/TUNING_WORKFLOW.md).
+    """
+    obs = env.get_obs()
+    goal = _lang_goal(lang_embeddings, val_annotations, subtask)
+    start_info = env.get_info()
+
+    obstacle = None
+    violated = False
+    reached = False
+    min_clearance = None
+    steps_taken = 0
+    n_decisions = 0
+    n_activated = 0
+    first_chunk = True
+    trajectory = [panda_frames(_joint_angles_from_obs(obs))] if record_trajectory else None
+    if record_camera_frames:
+        first_rgb, first_depth = _camera_frame(env)
+        camera_frames, depth_frames = [first_rgb], [first_depth]
+    else:
+        camera_frames = depth_frames = None
+
+    while steps_taken < ep_len:
+        joint_angles = _joint_angles_from_obs(obs)
+        candidates = policy.propose({**obs, "goal": goal})
+        current_info = env.get_info()
+        scores = calvin_progress_scores(task_oracle, subtask, current_info, joint_angles, candidates, replan_steps)
+        chunk, shield_info = shield.select(joint_angles, candidates, scores)
+        n_decisions += 1
+        if not all(shield_info["admissible_mask"]):
+            n_activated += 1
+        if shield_info["fallback"]:
+            chunk[:, 6] = _gripper_action_from_obs(obs)
+
+        if first_chunk and obstacle_fn is not None:
+            obstacle = obstacle_fn(joint_angles, candidates[0])
+        first_chunk = False
+
+        for action_row in chunk[:replan_steps]:
+            obs, _, _, current_info = env.step(_to_action_tensor(action_row))
+            steps_taken += 1
+
+            if record_trajectory:
+                trajectory.append(panda_frames(_joint_angles_from_obs(obs)))
+            if record_camera_frames:
+                rgb, depth = _camera_frame(env)
+                camera_frames.append(rgb)
+                depth_frames.append(depth)
+
+            clearance = _clearance(obs, obstacle)
+            if clearance is not None:
+                min_clearance = clearance if min_clearance is None else min(min_clearance, clearance)
+                if clearance <= 0:
+                    violated = True
+                    break
+
+            current_task_info = task_oracle.get_task_info_for_set(start_info, current_info, {subtask})
+            if len(current_task_info) > 0:
+                reached = True
+                break
+
+            if steps_taken >= ep_len:
+                break
+
+        if violated or reached:
+            break
+
+    result = {
+        "violated": violated, "reached": reached, "min_clearance": min_clearance,
+        "n_decisions": n_decisions, "n_activated": n_activated,
+    }
+    if record_trajectory:
+        result["trajectory"] = trajectory
+    if record_trajectory or record_camera_frames:
+        result["obstacle"] = obstacle
+    if record_camera_frames:
+        result["camera_frames"] = camera_frames
+        result["depth_frames"] = depth_frames
+    return result
+
+
+def run_calvin_shielded_sequence(
+    env, policy, task_oracle, lang_embeddings, initial_condition, eval_sequence, val_annotations,
+    get_env_state_for_initial_condition, shield, ep_len=360, replan_steps=10, obstacle_fn=None,
+    record_trajectory=False, record_camera_frames=False,
+):
+    """Shielded analogue of run_calvin_unshielded_sequence -- identical
+    truncation semantics (stop at the first not-reached subtask), see its
+    docstring."""
+    robot_obs, scene_obs = get_env_state_for_initial_condition(initial_condition)
+    env.reset(robot_obs=robot_obs, scene_obs=scene_obs)
+
+    attempts = []
+    for subtask in eval_sequence:
+        result = run_calvin_shielded_subtask(
+            env, policy, task_oracle, lang_embeddings, subtask, val_annotations, shield,
             ep_len=ep_len, replan_steps=replan_steps, obstacle_fn=obstacle_fn,
             record_trajectory=record_trajectory, record_camera_frames=record_camera_frames,
         )

@@ -44,8 +44,14 @@ for every `sampler_type` in `sample_loop()`, including the ones commented
 deterministic *given* a fixed starting noise `x`, and `x` itself is
 resampled every call; the "SDE stochastic" samplers (`ancestral`,
 `euler_ancestral`) add even more per-step noise on top of that.
+
+`ForwardOnlyPolicy` below batches this same draw (`len(latent_goal)`
+becomes `n_candidates` instead of 1, in one forward call) rather than
+looping `n_candidates` calls of batch size 1 -- see its own docstring.
+Same source of diversity either way; batching only parallelizes it.
 """
 import numpy as np
+import torch
 
 
 class MDTPolicyClient:
@@ -83,6 +89,94 @@ class MDTPolicyClient:
             np.asarray(self._model(observation, observation["goal"]).squeeze(0).detach().cpu())
             for _ in range(self.n_candidates)
         ]
+
+
+class ForwardOnlyPolicy:
+    """Wraps an already-configured `MDTVAgent` (loaded + overridden by the
+    caller -- see scripts/run_calvin_unshielded.py / run_calvin_shielded.py's
+    own main(): `get_default_beso_and_env` then sampler_type/
+    num_sampling_steps/sigma/EMA-weight overrides applied) and draws all
+    `n_candidates` diffusion samples in ONE batched forward call, instead of
+    looping `model(observation, goal)` `n_candidates` times the way
+    MDTPolicyClient.propose() above does.
+
+    That loop is genuinely wasteful for a real run: every iteration re-runs
+    the vision encoder (`compute_voltron_embeddings`) on the *same*
+    rgb_static/rgb_gripper, and `MDTVAgent.forward()`'s own preprocessing
+    (mdtv_agent.py:688) has no batching path at all, so nothing amortizes
+    across candidates.
+
+    Fix: replicate `forward()`'s own preprocessing verbatim for the single
+    real observation (batch=1 -- `language_goal`/`compute_voltron_
+    embeddings`, unchanged from `forward()`'s own code), then
+    `.expand(n_candidates, ...).contiguous()` the resulting conditioning
+    tensors (`latent_goal`, `perceptual_emb`) before calling
+    `denoise_actions()` once. `denoise_actions()` draws `x = torch.randn((
+    len(latent_goal), act_window_size, 7))` internally (mdtv_agent.py:546)
+    -- with `latent_goal`'s batch dim now `n_candidates`, this draws
+    `n_candidates` independent noise seeds and denoises all of them in one
+    batched pass, so every returned candidate is still a genuinely
+    independent sample (see module docstring's "Diversity across repeated
+    calls" note -- batching only parallelizes the same mechanism, it does
+    not change what makes candidates differ).
+
+    Deliberately does NOT call `model(observation, goal)` / `model.
+    forward()` for the batched path: `forward()`'s own lang-goal branch
+    does `self.language_goal(goal["lang"]).unsqueeze(0)`, which *hardcodes*
+    a batch-of-1 result -- feeding it an already-batched goal would
+    silently produce the wrong shape. Bypassed by computing latent_goal/
+    perceptual_emb for the one real observation first (batch=1, exactly as
+    forward() does) and expanding *after* -- never re-deriving
+    `language_goal`'s own batching behavior, which has not been verified.
+
+    Only supports `goal={"lang": ...}` (CALVIN's own conditioning, per
+    module docstring) -- raises NotImplementedError for the visual-goal
+    branch (`forward()`'s `else` case), whose `rgb_static.squeeze(0))`
+    handling was not verified to generalize to batch > 1 and is not
+    exercised by this project's actual checkpoint/harness anyway.
+    """
+
+    def __init__(self, model, n_candidates=1):
+        self.model = model
+        self.n_candidates = n_candidates
+
+    def propose(self, observation):
+        goal = observation["goal"]
+        model = self.model
+        k = self.n_candidates
+
+        if "lang" not in goal:
+            raise NotImplementedError(
+                "ForwardOnlyPolicy's batched propose only supports "
+                "goal={'lang': ...} -- see class docstring."
+            )
+
+        rgb_static = observation["rgb_obs"]["rgb_static"]
+        rgb_gripper = observation["rgb_obs"]["rgb_gripper"]
+
+        # Verbatim copy of MDTVAgent.forward()'s own lang-goal preprocessing
+        # (mdtv_agent.py:692-698) for the single real observation (batch=1).
+        if model.use_text_not_embedding:
+            latent_goal = model.language_goal(goal["lang_text"])
+            latent_goal = latent_goal.to(torch.float32)
+        else:
+            latent_goal = model.language_goal(goal["lang"]).unsqueeze(0).to(torch.float32).to(rgb_static.device)
+
+        perceptual_emb = model.compute_voltron_embeddings(rgb_static, rgb_gripper)
+        perceptual_emb["modality"] = "lang"
+
+        # batch=1 -> batch=k. .contiguous() (not just .expand()) so nothing
+        # downstream trips over a stride-0 view if it calls .view() instead
+        # of .reshape() on these tensors.
+        latent_goal_k = latent_goal.expand(k, *latent_goal.shape[1:]).contiguous()
+        perceptual_emb_k = {
+            key: (value.expand(k, *value.shape[1:]).contiguous() if torch.is_tensor(value) else value)
+            for key, value in perceptual_emb.items()
+        }
+        latent_plan_k = torch.zeros_like(latent_goal_k)
+
+        action_seq = model.denoise_actions(latent_plan_k, perceptual_emb_k, latent_goal_k, inference=True)
+        return [np.asarray(action_seq[i].detach().cpu()) for i in range(k)]
 
 
 class MockMDTPolicyClient:

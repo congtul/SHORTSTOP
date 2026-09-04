@@ -1,8 +1,9 @@
 import numpy as np
 
-from shortstop.arm_shield import ArmReachOnlyShield, ArmRepairShield, ArmSTLShield
+from shortstop.arm_reach import propagate_arm_tube
+from shortstop.arm_shield import ArmConfThreshShield, ArmReachOnlyShield, ArmRepairShield, ArmSTLShield
 from shortstop.env import Obstacle
-from shortstop.robot_geometry import N_JOINTS
+from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS
 
 
 def _straight_chunk(dx, horizon=4):
@@ -79,3 +80,81 @@ def test_arm_repair_shield_falls_back_when_repair_cannot_fix_it_in_time():
     action, info = shield.select(q, [chunk], scores=[1.0])
     assert info["fallback"]
     assert np.allclose(action, np.zeros_like(chunk))
+
+
+def _endpoint(q, chunk):
+    tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
+    return tube[-1][FLANGE_FRAME_INDEX].center()
+
+
+def test_arm_conf_thresh_shield_rejects_the_outlier_but_keeps_the_agreeing_candidates():
+    q = np.zeros(N_JOINTS)
+    agree_a = _straight_chunk(0.05)
+    agree_b = _straight_chunk(0.05001)  # same direction, tiny float variation -> near-identical endpoint
+    outlier = _straight_chunk(-0.05)  # opposite direction -> far from the other two
+
+    distances_from_centroid = [
+        np.linalg.norm(e - np.mean([_endpoint(q, c) for c in (agree_a, agree_b, outlier)], axis=0))
+        for e in [_endpoint(q, c) for c in (agree_a, agree_b, outlier)]
+    ]
+    threshold = (max(distances_from_centroid[:2]) + distances_from_centroid[2]) / 2
+
+    shield = ArmConfThreshShield(disagreement_threshold=threshold, replan_steps=4)
+    action, info = shield.select(q, [agree_a, agree_b, outlier], scores=[1.0, 2.0, 3.0])
+
+    assert info["admissible_mask"] == [True, True, False]
+    assert np.allclose(action, agree_b)  # admissible with the higher score (2.0 > 1.0)
+
+
+def test_arm_conf_thresh_shield_picks_highest_score_among_admissible():
+    q = np.zeros(N_JOINTS)
+    a = _straight_chunk(0.05)
+    b = _straight_chunk(0.05001)  # close enough to agree at a generous threshold
+
+    shield = ArmConfThreshShield(disagreement_threshold=10.0, replan_steps=4)
+    action, info = shield.select(q, [a, b], scores=[5.0, 1.0])
+
+    assert info["admissible_mask"] == [True, True]
+    assert np.allclose(action, a)
+
+
+def test_arm_conf_thresh_shield_falls_back_when_every_candidate_disagrees():
+    q = np.zeros(N_JOINTS)
+    a = _straight_chunk(0.05)
+    b = _straight_chunk(-0.05)
+
+    shield = ArmConfThreshShield(disagreement_threshold=1e-9, replan_steps=4)
+    action, info = shield.select(q, [a, b], scores=[1.0, 2.0])
+
+    assert info["fallback"]
+    assert np.allclose(action, np.zeros_like(a))
+
+
+def test_arm_conf_thresh_shield_measures_disagreement_only_over_the_first_replan_steps_rows():
+    """Regression test for the replan_steps fix: `a` and `b` are IDENTICAL
+    for their first 2 rows, then diverge sharply on rows 3-4 -- rows that
+    would never be committed if replan_steps=2. With replan_steps=2 both
+    candidates' endpoints coincide exactly (disagreement=0, trivially
+    admissible at any threshold); with replan_steps=4 (the full chunk)
+    they end up ~1.1m apart (disagreement>0, rejected at a tight
+    threshold). Same two candidates, same threshold -- only replan_steps
+    changes, so a different verdict proves the endpoint really is being
+    computed over the truncated prefix, not silently still the full chunk.
+    """
+    q = np.zeros(N_JOINTS)
+    a = np.array([[0.05, 0, 0, 0, 0, 0, 0]] * 4)
+    b = np.array([[0.05, 0, 0, 0, 0, 0, 0], [0.05, 0, 0, 0, 0, 0, 0],
+                  [-0.5, 0, 0, 0, 0, 0, 0], [-0.5, 0, 0, 0, 0, 0, 0]])
+    assert np.allclose(a[:2], b[:2])  # identical prefix by construction
+    assert not np.allclose(_endpoint(q, a), _endpoint(q, b))  # but diverge by the full chunk's end
+
+    threshold = 0.3  # strictly between 0 (prefix disagreement) and ~0.55 (full-chunk disagreement)
+
+    shield_prefix = ArmConfThreshShield(disagreement_threshold=threshold, replan_steps=2)
+    shield_full = ArmConfThreshShield(disagreement_threshold=threshold, replan_steps=4)
+
+    _, info_prefix = shield_prefix.select(q, [a, b], scores=[1.0, 1.0])
+    _, info_full = shield_full.select(q, [a, b], scores=[1.0, 1.0])
+
+    assert info_prefix["admissible_mask"] == [True, True]
+    assert info_full["admissible_mask"] == [False, False]
