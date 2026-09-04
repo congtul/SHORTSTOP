@@ -94,9 +94,16 @@ OBSTACLE_RADIUS = 0.08
 
 # Candidate disagreement_threshold values to sweep (meters, same units as
 # the endpoint-vs-centroid distance ArmConfThreshShield computes) --
-# PLACEHOLDER, fill in from the diagnostic pass's actual percentiles
-# before trusting any of these. Only read in --tuning mode.
-THRESHOLDS_TO_SWEEP = [0.02, 0.05, 0.1]
+# REVISED 2026-09-05 from the diagnostic pass's real percentiles (real
+# run, n_sequences=100, REPLAN_STEPS=10, radius=0.08): disagreement over
+# 17856 candidate-level values -- mean=0.368 median=0.349 p10=0.146
+# p90=0.609 p99=0.906 min=0.003 max=1.387. The original placeholder
+# [0.02, 0.05, 0.1] was far below even p10 -- every one of them rejected
+# essentially every candidate (shield_activation_rate 0.996-1.0,
+# success_rate ~0), so no real tradeoff curve was visible. Spans p10 ->
+# median -> p90 -> p99 this time to actually see violation/success/
+# activation move. Only read in --tuning mode.
+THRESHOLDS_TO_SWEEP = [0.15, 0.35, 0.6, 0.9]
 
 # Final, already-chosen threshold -- PLACEHOLDER until the tuning pass
 # above actually picks tau*. Only read in eval mode (no --tuning flag).
