@@ -1,0 +1,1493 @@
+{
+  "tuning_mode": false,
+  "cohort_sequence_idx_range": [
+    100,
+    200
+  ],
+  "radii_to_sweep": [
+    0.06
+  ],
+  "results": [
+    {
+      "label": "with obstacle r=0.06",
+      "radius": 0.06,
+      "violation_rate": 0.186,
+      "success_rate": 0.222,
+      "avg_seq_len": 1.11,
+      "attempted_violation_fraction": 0.44711538461538464,
+      "n_sequences": 100,
+      "clearance_stats": {
+        "n": 208,
+        "mean": 0.06798841417047738,
+        "median": 0.020243696500089343,
+        "p10": -0.0656404090235062,
+        "p90": 0.23482342768160847,
+        "min": -0.14761316705505975,
+        "max": 0.424039629593601
+      },
+      "violated_steps_taken_stats": {
+        "n": 93,
+        "mean": 10.505376344086022,
+        "median": 9.0,
+        "p10": 1.0,
+        "p90": 22.799999999999997,
+        "min": 1,
+        "max": 95
+      },
+      "video_paths": [
+        "videos/seq12_r0p06.mp4"
+      ],
+      "video_skip_reason": null,
+      "sequence_results": [
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0024409295485483783,
+            "steps_taken": 15
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0032930810791906157,
+            "steps_taken": 10
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0003170960098996395,
+            "steps_taken": 11
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.15284214357835313,
+            "steps_taken": 59
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.059521642958456134,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0027044382337729073,
+            "steps_taken": 13
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.08480671435094443,
+            "steps_taken": 56
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.01934541329480069,
+            "steps_taken": 99
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.006439275125088725,
+            "steps_taken": 22
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.28482298418838103,
+            "steps_taken": 151
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.00235209578532802,
+            "steps_taken": 24
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.09924502480064683,
+            "steps_taken": 61
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.10314719305313955,
+            "steps_taken": 221
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.23132779296177103,
+            "steps_taken": 336
+          },
+          {
+            "violated": false,
+            "reached": false,
+            "min_clearance": 0.3146857788736393,
+            "steps_taken": 360
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.1345642633061967,
+            "steps_taken": 85
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.19445960397459136,
+            "steps_taken": 89
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.020976660711609793,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0006395407331255681,
+            "steps_taken": 18
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.10084644104150046,
+            "steps_taken": 154
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0737837419349008,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.15829963622985216,
+            "steps_taken": 63
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.08000157832154058,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.08690877455798356,
+            "steps_taken": 70
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.11761631891133605,
+            "steps_taken": 92
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.21074263113910183,
+            "steps_taken": 78
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.17235040424742992,
+            "steps_taken": 98
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.008119675974138985,
+            "steps_taken": 17
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.006046422326808257,
+            "steps_taken": 11
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.2343469022707679,
+            "steps_taken": 33
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.09012398604674839,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.15188060289942662,
+            "steps_taken": 106
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0966982694215214,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.00025072531632294726,
+            "steps_taken": 21
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.17654383962340203,
+            "steps_taken": 81
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.017388803370566516,
+            "steps_taken": 85
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.11420817051902304,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.21695871820048832,
+            "steps_taken": 50
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.1212309635602635,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.19176737527594656,
+            "steps_taken": 39
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0026622437833124374,
+            "steps_taken": 10
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.05661044155833585,
+            "steps_taken": 56
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.05227545808392116,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.17110810021303627,
+            "steps_taken": 61
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.07414180236555289,
+            "steps_taken": 109
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.12371433609989618,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.12543953507348266,
+            "steps_taken": 31
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.07277451348708515,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0015959114915029132,
+            "steps_taken": 28
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.0809175993540497,
+            "steps_taken": 74
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.10800737601260178,
+            "steps_taken": 91
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.07093411387392036,
+            "steps_taken": 72
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0012167186951758252,
+            "steps_taken": 14
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0014531976095082527,
+            "steps_taken": 22
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.18621211961395623,
+            "steps_taken": 95
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.20537938007594558,
+            "steps_taken": 72
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0039717985795608285,
+            "steps_taken": 15
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.11621375879987493,
+            "steps_taken": 55
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.19935965547702256,
+            "steps_taken": 26
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.08712665795338453,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.005231149304993257,
+            "steps_taken": 86
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.11694197278072865,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.08141641144018208,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.01731497523595431,
+            "steps_taken": 77
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.05900819397742231,
+            "steps_taken": 87
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.2877935604223812,
+            "steps_taken": 102
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.12796305160515514,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0025961259946180315,
+            "steps_taken": 4
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.017520875687724553,
+            "steps_taken": 62
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.4122660238892308,
+            "steps_taken": 87
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.03753999099076609,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.33577554950743715,
+            "steps_taken": 67
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.11256149660081242,
+            "steps_taken": 108
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.021314622452040244,
+            "steps_taken": 60
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.09726981044965956,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0021403550967697,
+            "steps_taken": 32
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.07895990169293059,
+            "steps_taken": 74
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.030658258596131818,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.00407659929011768,
+            "steps_taken": 16
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.23593532030690303,
+            "steps_taken": 39
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.05951303066442569,
+            "steps_taken": 38
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.07264765468577412,
+            "steps_taken": 57
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.09937216005037258,
+            "steps_taken": 62
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.03087130642271899,
+            "steps_taken": 87
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.10304337312657573,
+            "steps_taken": 78
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.08893917335526587,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.005324593720535495,
+            "steps_taken": 15
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0029439074105422174,
+            "steps_taken": 6
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.11278240075560851,
+            "steps_taken": 63
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.005450208287024,
+            "steps_taken": 20
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.003138809236167786,
+            "steps_taken": 20
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0019746810538862486,
+            "steps_taken": 9
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.030769081029842146,
+            "steps_taken": 58
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.2641064955521868,
+            "steps_taken": 66
+          },
+          {
+            "violated": false,
+            "reached": false,
+            "min_clearance": 0.2081651940433839,
+            "steps_taken": 360
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.00013332040300952086,
+            "steps_taken": 20
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.34568440802887135,
+            "steps_taken": 69
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.14761316705505975,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.16305760764500227,
+            "steps_taken": 38
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0023099003408706548,
+            "steps_taken": 7
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.12279452296312997,
+            "steps_taken": 69
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.29277503473553385,
+            "steps_taken": 54
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.424039629593601,
+            "steps_taken": 85
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0020847766597678202,
+            "steps_taken": 29
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.10020763539143183,
+            "steps_taken": 80
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.2583371498142197,
+            "steps_taken": 71
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.001332525380937255,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.1454748670754194,
+            "steps_taken": 48
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.1562399742604802,
+            "steps_taken": 60
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.04185518073057819,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0008390818965053753,
+            "steps_taken": 5
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.005494602291818359,
+            "steps_taken": 6
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.23341720957681014,
+            "steps_taken": 99
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.09683738069853103,
+            "steps_taken": 83
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.3833394895339221,
+            "steps_taken": 80
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.040369231024285995,
+            "steps_taken": 31
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.04665211473687306,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.004945957257869962,
+            "steps_taken": 11
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.161811877005827,
+            "steps_taken": 55
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.034085918850544294,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0035979740464601277,
+            "steps_taken": 10
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.24988694944053025,
+            "steps_taken": 65
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.003619495720162527,
+            "steps_taken": 14
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.1494776159345627,
+            "steps_taken": 66
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.05911354506032971,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.1861341414760338,
+            "steps_taken": 80
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.16284174758603193,
+            "steps_taken": 71
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0008227026153638517,
+            "steps_taken": 11
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.05628852332196778,
+            "steps_taken": 61
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.00839098463952058,
+            "steps_taken": 24
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.15112910503167382,
+            "steps_taken": 71
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.07396431892506102,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.006248933674516469,
+            "steps_taken": 13
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.18431800319419145,
+            "steps_taken": 31
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0006579912994158083,
+            "steps_taken": 35
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.1201439891824203,
+            "steps_taken": 57
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.015356282471046354,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.05727695004985005,
+            "steps_taken": 65
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.005623269010142304,
+            "steps_taken": 9
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.21295409028023105,
+            "steps_taken": 80
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.17645850556658438,
+            "steps_taken": 76
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.01694095885078896,
+            "steps_taken": 86
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.23403149522904684,
+            "steps_taken": 75
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.00483489247292683,
+            "steps_taken": 31
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.006352384875265918,
+            "steps_taken": 14
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0625829356819724,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.35413297300272367,
+            "steps_taken": 44
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.08301496156795694,
+            "steps_taken": 48
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.021141979705377997,
+            "steps_taken": 77
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.1321911847125211,
+            "steps_taken": 105
+          },
+          {
+            "violated": false,
+            "reached": false,
+            "min_clearance": 0.0884278510148507,
+            "steps_taken": 360
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.0884683185666957,
+            "steps_taken": 73
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.041439812669946854,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.11375922822438993,
+            "steps_taken": 81
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.04566944737286917,
+            "steps_taken": 37
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.0015487659589871888,
+            "steps_taken": 84
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.21842834280605286,
+            "steps_taken": 76
+          },
+          {
+            "violated": false,
+            "reached": false,
+            "min_clearance": 0.16872255228937139,
+            "steps_taken": 360
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0004924865145313068,
+            "steps_taken": 14
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.05529855880762556,
+            "steps_taken": 34
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.12151691408249202,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.002200126960965068,
+            "steps_taken": 39
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.00011672877469488807,
+            "steps_taken": 10
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0021199831618020776,
+            "steps_taken": 9
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.07864793737001576,
+            "steps_taken": 45
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0017736911664161248,
+            "steps_taken": 10
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.012145646053722179,
+            "steps_taken": 55
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.060045188328733,
+            "steps_taken": 83
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.024925776411274927,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.01633147534571393,
+            "steps_taken": 34
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.025815229430938433,
+            "steps_taken": 66
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.042361937373143754,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.31246232097832405,
+            "steps_taken": 59
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.1838171897446194,
+            "steps_taken": 137
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.28932676635726245,
+            "steps_taken": 45
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.3378196183754797,
+            "steps_taken": 69
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.3589250946724662,
+            "steps_taken": 40
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.07498457086332437,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0006180495428617788,
+            "steps_taken": 19
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0009127158251232385,
+            "steps_taken": 14
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.27189722618773027,
+            "steps_taken": 72
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.07751424929013215,
+            "steps_taken": 60
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.03336444968787612,
+            "steps_taken": 94
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.2906651161235702,
+            "steps_taken": 80
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.004204224089085495,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.003299389388296589,
+            "steps_taken": 14
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0014555793791402455,
+            "steps_taken": 9
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0010358130740603516,
+            "steps_taken": 14
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.11134409002637362,
+            "steps_taken": 60
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0022432021449581944,
+            "steps_taken": 95
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.004342825004800058,
+            "steps_taken": 6
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.22975035066281096,
+            "steps_taken": 66
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.09749367699313764,
+            "steps_taken": 71
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.04110612340001081,
+            "steps_taken": 30
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.078658061965132,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.2005412916252857,
+            "steps_taken": 91
+          },
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.011229790726847017,
+            "steps_taken": 41
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.12412313557985197,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.3004510811930585,
+            "steps_taken": 58
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.032362621505786296,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": false,
+            "reached": true,
+            "min_clearance": 0.05692056277085812,
+            "steps_taken": 56
+          },
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.13997065496138628,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.001809854042020706,
+            "steps_taken": 22
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0035096742115946628,
+            "steps_taken": 23
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0005261413432518514,
+            "steps_taken": 3
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0062385182735102546,
+            "steps_taken": 11
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.031400307926810034,
+            "steps_taken": 1
+          }
+        ],
+        [
+          {
+            "violated": true,
+            "reached": false,
+            "min_clearance": -0.0014718462992257125,
+            "steps_taken": 45
+          }
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+[run] writing log + results.json (+ videos/ if any) to: /home/congtul/SHORTSTOP/outputs/calvin_unshielded_runs/run_20260906_015834_eval
+[run] cohort: EVAL (idx N..2N-1) -- pass --tuning to switch (see docs/TUNING_WORKFLOW.md muc 0)
+[run] config: num_sequences=100 ep_len=360 replan_steps=10 sampler_type=ddim num_sampling_steps=10 debug=True
+[with obstacle r=0.06] violation_rate=0.186  success_rate=0.222  (avg_seq_len=1.11/5, n_sequences=100)
+  [debug] with obstacle r=0.06: attempted_violation_fraction=0.447  (93/208 attempted subtasks)
+  [debug] with obstacle r=0.06: min_clearance over 208 attempted subtasks -- mean=0.0680  median=0.0202  p10=-0.0656  p90=0.2348  min=-0.1476  max=0.4240
+  [debug] with obstacle r=0.06: steps_taken over 93 VIOLATED attempts (does the arm get a real chance to move first?) -- mean=10.51  median=9.00  p10=1.00  p90=22.80  min=1  max=95
+  [progress] wrote 1/1 entry(ies) so far to: /home/congtul/SHORTSTOP/outputs/calvin_unshielded_runs/run_20260906_015834_eval/results.json
+[debug] saved 1 obstacle-visualization video(s) under: /home/congtul/SHORTSTOP/outputs/calvin_unshielded_runs/run_20260906_015834_eval/videos
+[run] wrote structured results to: /home/congtul/SHORTSTOP/outputs/calvin_unshielded_runs/run_20260906_015834_eval/results.json
+[run] DONE -- zip up /home/congtul/SHORTSTOP/outputs/calvin_unshielded_runs/run_20260906_015834_eval and send it back for tuning analysis
