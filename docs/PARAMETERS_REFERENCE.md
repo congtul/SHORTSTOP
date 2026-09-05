@@ -131,6 +131,15 @@ Nhận xét khi tune: (1) `min_clearance + radius` ra **đúng hằng số -0.10
 
 Muốn sweep lại (checkpoint mới, hoặc muốn xem ceiling effect ở radius > 0.12): sửa `RADII_TO_SWEEP` trong `scripts/run_calvin_unshielded.py`.
 
+**✅ Xác nhận sạch trên eval cohort (idx 100-199, 2026-09-05)** — bảng trên đo trên tuning cohort (idx 0-99), có bias tối ưu nhẹ theo `feedback_tuning_cohort_split`. Chạy lại đúng 1 lần trên eval cohort (`python scripts/run_calvin_unshielded.py`, không cờ, `REPLAN_STEPS=10`, `radius=0.08`):
+
+| | violation_rate | success_rate | avg_seq_len |
+|---|---|---|---|
+| without obstacle | — | **0.926** | 4.63/5 |
+| with obstacle r=0.08 | **0.136** | **0.476** | 2.38/5 |
+
+Gần như y hệt bảng tuning (0.128→0.136, 0.482→0.476) — xác nhận bias tuning-on-eval trước đó nhỏ, đúng như dự đoán. **Dùng số eval này (violation=0.136, success=0.476) làm baseline unshielded cuối cùng để báo cáo**, không phải số ở bảng tuning phía trên.
+
 ### num_sequences / n_episodes — cỡ mẫu
 - **Không phải tham số đánh đổi chất lượng** — chỉ ảnh hưởng độ tin cậy thống kê của các metric đo được.
 - **Output cần theo dõi**: độ rộng của confidence interval (paper's own recipe: bootstrap 10^4 resamples) hoặc đơn giản là chạy lại với seed khác, xem các metric có dao động nhiều không.
