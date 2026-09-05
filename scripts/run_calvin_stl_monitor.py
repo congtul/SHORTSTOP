@@ -102,7 +102,7 @@ from shortstop.mdt_policy_client import ForwardOnlyPolicy  # noqa: E402
 # relationship to run_calvin_unshielded.py.
 N_CANDIDATES = 8
 REPLAN_STEPS = 10
-OBSTACLE_RADIUS = 0.08
+OBSTACLE_RADIUS = 0.06
 # Must match run_calvin_unshielded.py's OBSTACLE_OFFSET_MAX exactly, not
 # sample_obstacle_from_reference_chunk's own default -- see that
 # function's docstring / calvin_obstacle_offset_floor_too_high memory for

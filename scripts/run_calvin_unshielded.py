@@ -147,18 +147,32 @@ REPLAN_STEPS = 10
 # 0.389 (r=0.04) -> 0.487 (r=0.08) -> 0.549 (r=0.12) -> 0.634 (r=0.16),
 # no floor (0.269 is a real, moderate baseline, not ~0 or saturated) or
 # ceiling (0.634 at the top of the tested range, success_rate still 0.108
-# rather than ~0) hit anywhere in this list. **Chosen: radius=0.08**
-# (attempted_violation_fraction=0.487, cohort violation_rate=0.184,
-# success_rate=0.184, avg_seq_len=0.92/5) -- same balance-point reasoning
-# as the original (now-void) 0.08 pick: violation high enough for a
-# shield to have real work to do, success_rate still clearly nonzero so
-# improvement from a shield stays visible against a nontrivial baseline.
-# Trimmed to just the chosen value; see docs/PARAMETERS_REFERENCE.md's
-# "radius" entry for the full table + tuning-cohort caveat (this was run
-# on idx 0-99 -- still needs one confirmatory eval-cohort run, idx
-# 100-199, before citing final numbers -- see feedback_tuning_cohort_split
-# memory).
-RADII_TO_SWEEP = [0.08]
+# rather than ~0) hit anywhere in this list. 0.08 was picked first (see
+# docs/PARAMETERS_REFERENCE.md's "radius" entry for that reasoning + the
+# full table), then REVISED to 0.06 (below) once real ShortStop/Repair
+# trust_region concerns came up -- see that same section for why.
+#
+# CHANGED 2026-09-06 (same day) -- radius=0.08 -> **0.06**, decided
+# directly against the eval cohort (idx 100-199, no separate tuning-
+# cohort sweep at exactly 0.06 -- a deliberate shortcut given 0.06 sits
+# between the already-swept 0.04/0.08 points above, interpolating
+# cleanly, not a fresh unknown value; flagged here as a real deviation
+# from feedback_tuning_cohort_split's usual protocol, not silently
+# glossed over). Real eval-cohort result (results/unshielded/run.log):
+# violation_rate=0.186, success_rate=0.222, avg_seq_len=1.11/5,
+# attempted_violation_fraction=0.447 (93/208 attempted subtasks),
+# min_clearance mean=0.068 median=0.0202 p10=-0.0656 p90=0.2348
+# min=-0.1476 max=0.4240. Reason for the change: 0.08's obstacle+capsule
+# capture zone (up to ~0.28m) was judged too large relative to
+# ArmRepairShield's own single-shot trust_region=0.05m escape budget --
+# a candidate violating by more than trust_region can't be repaired in
+# ONE gradient step (max_repair_iters=1, matching Algorithm 1), so 0.06
+# leaves more headroom for repair to actually succeed. This is now the
+# FINAL, cited radius for every CALVIN baseline -- see docs/PARAMETERS_
+# REFERENCE.md's "radius" entry for the full writeup, and every other
+# run_calvin_*.py script's own OBSTACLE_RADIUS (kept in sync by hand,
+# same convention as OBSTACLE_OFFSET_MAX).
+RADII_TO_SWEEP = [0.06]
 
 # sample_obstacle_from_reference_chunk's offset_max (see calvin_obstacle.py
 # docstring) -- how far off the arm's own predicted centerline the

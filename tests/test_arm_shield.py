@@ -2,11 +2,11 @@ import numpy as np
 
 from shortstop.arm_reach import CALVIN_ACTION_SCALE, arm_robustness_to_go, nominal_joint_trajectory, propagate_arm_tube
 from shortstop.arm_shield import (
-    ArmConfThreshShield, ArmMPCFilterShield, ArmReachOnlyShield, ArmRepairShield, ArmSTLMonitorShield,
+    ArmCBFShield, ArmConfThreshShield, ArmMPCFilterShield, ArmReachOnlyShield, ArmRepairShield, ArmSTLMonitorShield,
     ArmSTLShield,
 )
 from shortstop.env import Obstacle
-from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS, within_joint_limits
+from shortstop.robot_geometry import FLANGE_FRAME_INDEX, JOINT_LIMITS, N_JOINTS, panda_frames, within_joint_limits
 
 # A real, well-within-JOINT_LIMITS Franka "ready" pose -- NOT np.zeros:
 # joint 4 (index 3)'s own real range is entirely negative ([-3.0718,
@@ -223,6 +223,198 @@ def test_arm_mpc_filter_shield_resolve_returns_none_when_infeasible():
     assert shield.resolve(q, chunk) is None
 
 
+def test_arm_cbf_shield_leaves_the_chunk_unchanged_when_no_obstacle_is_near():
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    far_obstacle = Obstacle(center=np.array([100.0, 100.0, 100.0]), radius=0.02)
+
+    shield = ArmCBFShield(obstacles=[far_obstacle], w_bar=0.0, model_error=0.0)
+    action, info = shield.select(q, [chunk], scores=[1.0])
+
+    assert info["fallback"] is False
+    assert info["intervened"] is False
+    assert info["admissible_mask"] == [True]
+    assert np.allclose(action[:, :3], chunk[:, :3], atol=1e-6)
+
+
+def test_arm_cbf_shield_corrects_only_the_first_action_of_a_chunk_that_hits_an_obstacle():
+    """Regression test for CBF-Shield's own defining property (see class
+    docstring): unlike ArmMPCFilterShield (which corrects the WHOLE
+    horizon in one QP), CBF is pointwise -- it may only ever touch
+    candidates[0][0]. Rows 1: must come back byte-for-byte identical to
+    the nominal chunk, even though the SAME obstacle would make
+    ArmMPCFilterShield correct every one of those rows too."""
+    q = Q_HOME
+    chunk = _straight_chunk(0.05, horizon=4)
+    tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+
+    shield = ArmCBFShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0, alpha=1.0)
+    action, info = shield.select(q, [chunk], scores=[1.0])
+
+    assert info["fallback"] is False
+    assert info["intervened"] is True
+    assert not np.allclose(action[0, :3], chunk[0, :3], atol=1e-6)
+    assert np.allclose(action[1:, :3], chunk[1:, :3], atol=1e-9)  # untouched, unlike MPC-Filter
+
+    # The corrected FIRST real step alone must be genuinely safe against
+    # the true (nonlinear) reachtube -- the same ground-truth check every
+    # other shield's own correction is judged by, restricted to horizon=1
+    # since that's the only step this shield ever actually corrects.
+    # Tolerance matches ArmMPCFilterShield's own resolve-test precedent
+    # (real measured value there: ~-0.00068) -- a single linearization
+    # pass against the true nonlinear chain always leaves some small,
+    # expected residual, not exactly zero.
+    corrected_tube = propagate_arm_tube(q, action[:1], w_bar=0.0, model_error=0.0)
+    assert arm_robustness_to_go(corrected_tube, [obstacle]) >= -1e-3
+
+
+def test_arm_cbf_shield_enforces_joint_limits_even_with_no_obstacle():
+    """A single step that alone would drive a joint past JOINT_LIMITS (no
+    obstacle involved at all) must still get pulled back within range --
+    the arm's analogue of 2D's max_action_norm bound, checked directly
+    via nominal_joint_trajectory/within_joint_limits on the TRUE (not
+    linearized) resulting one-step trajectory. Only an extreme single-step
+    delta (1.0 real meter -- far more than any realistic chunk row) is
+    enough to trip a joint limit in just ONE step (a smaller, more modest
+    delta stays within range even uncorrected, since JOINT_LIMITS' own
+    range is wide); the QP's minimal-cost correction for this exact
+    scenario happens to land essentially EXACTLY on the boundary (unlike
+    ArmMPCFilterShield's own analogous test, which has 10 steps of slack
+    to distribute the correction across), so the check below allows a
+    tiny (1e-6 rad) floating-point/solver-tolerance margin rather than
+    demanding an exact boolean pass."""
+    q = Q_HOME
+    step = np.array([1.0 / CALVIN_ACTION_SCALE, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    chunk = np.tile(step, (2, 1))
+    assert not all(within_joint_limits(qk) for qk in nominal_joint_trajectory(q, chunk[:1])[1:])
+
+    shield = ArmCBFShield(obstacles=[], w_bar=0.0, model_error=0.0)
+    action, info = shield.select(q, [chunk], scores=[1.0])
+
+    assert info["fallback"] is False
+    assert info["intervened"] is True
+    corrected_trajectory = nominal_joint_trajectory(q, action[:1])
+    q_next = corrected_trajectory[1]
+    assert np.all(q_next >= JOINT_LIMITS[:, 0] - 1e-6)
+    assert np.all(q_next <= JOINT_LIMITS[:, 1] + 1e-6)
+
+
+def test_arm_cbf_shield_falls_back_when_the_qp_is_infeasible():
+    """An absurdly large obstacle radius (5m) centered on the arm's own
+    CURRENT flange position can't be cleared by any one-step correction
+    -- the QP must report infeasible, not silently return a wrong/partial
+    solution."""
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    obstacle = Obstacle(center=panda_frames(q)[FLANGE_FRAME_INDEX], radius=5.0)
+
+    shield = ArmCBFShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0)
+    action, info = shield.select(q, [chunk], scores=[1.0])
+
+    assert info["fallback"] is True
+    assert info["admissible_mask"] == [False]
+    assert np.allclose(action, np.zeros_like(chunk))
+
+
+def test_arm_cbf_shield_resolve_matches_select_in_isolation():
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+    shield = ArmCBFShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0)
+
+    selected_action, _ = shield.select(q, [chunk], scores=[1.0])
+    resolved = shield.resolve(q, chunk)
+
+    assert resolved is not None
+    assert np.allclose(resolved, selected_action, atol=1e-6)
+
+
+def test_arm_cbf_shield_resolve_reoptimizes_only_the_next_action_from_a_drifted_real_state():
+    """Mirrors ArmMPCFilterShield's own drift test (see its docstring),
+    but for CBF's own single-step scope: after row 0 of the SELECTED
+    chunk executes for real, resolve() must re-correct only the (now)
+    remaining_chunk[0] from the REAL resulting state -- every later row
+    stays exactly as originally proposed, since CBF never re-plans a
+    horizon it never had in the first place."""
+    # horizon=4 (not e.g. 6): CBF only looks 1 step ahead, so an obstacle
+    # placed several steps out from the CURRENT state may correctly show
+    # NO intervention at all yet (still enough margin to absorb one more
+    # step) -- a real, documented difference from ArmMPCFilterShield's own
+    # whole-horizon lookahead, not a bug (confirmed: horizon=6 with this
+    # same dx genuinely shows intervened=False at select() -- the arm
+    # still has 0.05m of spare margin at the CURRENT step against an
+    # obstacle 0.3m out). horizon=4 is close enough for select() to
+    # already need a correction, matching the (independently verified)
+    # test_arm_cbf_shield_corrects_only_the_first_action_of_a_chunk_that_
+    # hits_an_obstacle scenario above -- this test's own focus is
+    # resolve()'s behavior, not re-deriving that reactive-distance
+    # boundary.
+    q_original = Q_HOME
+    chunk = _straight_chunk(0.05, horizon=4)
+    tube = propagate_arm_tube(q_original, chunk, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+    shield = ArmCBFShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0)
+
+    selected, select_info = shield.select(q_original, [chunk], scores=[1.0])
+    assert select_info["intervened"] is True
+
+    real_trajectory = nominal_joint_trajectory(q_original, selected[:1])
+    q_drifted = real_trajectory[1]
+    remaining = selected[1:]
+
+    resolved = shield.resolve(q_drifted, remaining)
+
+    assert resolved is not None
+    assert not np.allclose(resolved[0, :3], remaining[0, :3], atol=1e-6)  # genuinely re-optimized
+    assert np.allclose(resolved[1:, :3], remaining[1:, :3], atol=1e-9)  # later rows untouched
+    corrected_tube = propagate_arm_tube(q_drifted, resolved[:1], w_bar=0.0, model_error=0.0)
+    assert arm_robustness_to_go(corrected_tube, [obstacle]) >= -1e-3  # single-linearization residual, see above
+
+
+def test_arm_cbf_shield_resolve_returns_none_when_infeasible():
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    obstacle = Obstacle(center=panda_frames(q)[FLANGE_FRAME_INDEX], radius=5.0)
+    shield = ArmCBFShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0)
+
+    assert shield.resolve(q, chunk) is None
+
+
+def test_arm_cbf_shield_alpha_controls_how_fully_it_recovers_from_an_already_unsafe_margin():
+    """Regression test for what `alpha` actually does (see class
+    docstring's "What alpha actually controls"): starting from a state
+    whose margin against `obstacle` is ALREADY negative (h_current < 0 --
+    realistic here since FRAME_RADIUS[flange]=0.20 alone exceeds this
+    obstacle's own 0.05m radius), alpha=1.0 must fully recover to
+    robustness>=0 in this one step, while a smaller alpha (0.3) is only
+    required to partially close the gap -- confirmed via the SAME
+    ground-truth one-step reachtube check, not just comparing raw QP
+    correction magnitudes (which could differ for reasons unrelated to
+    alpha, e.g. solver numerics)."""
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+
+    lenient = ArmCBFShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0, alpha=0.3)
+    strict = ArmCBFShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0, alpha=1.0)
+
+    action_lenient, _ = lenient.select(q, [chunk], scores=[1.0])
+    action_strict, _ = strict.select(q, [chunk], scores=[1.0])
+
+    robustness_lenient = arm_robustness_to_go(
+        propagate_arm_tube(q, action_lenient[:1], w_bar=0.0, model_error=0.0), [obstacle],
+    )
+    robustness_strict = arm_robustness_to_go(
+        propagate_arm_tube(q, action_strict[:1], w_bar=0.0, model_error=0.0), [obstacle],
+    )
+
+    assert robustness_strict >= -1e-3  # alpha=1.0: full recovery to (near-)zero margin, modulo linearization residual
+    assert robustness_lenient < robustness_strict - 1e-6  # alpha=0.3: only a partial correction
+
+
 def test_arm_stl_monitor_shield_picks_highest_score_among_admissible():
     q = Q_HOME
     a = _straight_chunk(0.05)
@@ -267,11 +459,16 @@ def test_arm_stl_monitor_shield_epsilon_is_a_real_tunable_margin_not_hardcoded_z
     other = _straight_chunk(-0.05)  # moves away -- stays admissible at every epsilon tested here
     tube = propagate_arm_tube(q, candidate, w_bar=0.0, model_error=0.0)
     endpoint = tube[-1][FLANGE_FRAME_INDEX].center()
-    # Offset chosen so margin = offset - (FRAME_RADIUS[FLANGE_FRAME_INDEX] +
-    # obstacle.radius) = 0.04 exactly (0.29 - (0.20 + 0.05)) -- FRAME_RADIUS
-    # here = GRIPPER_TIP_OFFSET(0.14, fixed 2026-09-05, see robot_geometry.py)
-    # + GRIPPER_TIP_RADIUS(0.06) = 0.20.
-    obstacle = Obstacle(center=endpoint + np.array([0.29, 0.0, 0.0]), radius=0.05)
+    # Offset chosen (verified via arm_find_counterexample, not hand-derived)
+    # so arm_robustness_to_go(candidate's tube, [obstacle]) is a small
+    # POSITIVE margin (~0.028): admissible at epsilon=0.0, rejected once
+    # epsilon is raised past it. The binding primitive here is the
+    # "fingertip" capsule (propagate_arm_tube's 2026-09-06 addition, see
+    # its own docstring) -- NOT the flange's own point-capsule anymore
+    # (that shrank from FRAME_RADIUS[FLANGE_FRAME_INDEX]=0.20 to
+    # LINK_RADIUS[-1]=0.06 in that same fix, so it's no longer the
+    # tightest constraint at this offset).
+    obstacle = Obstacle(center=endpoint + np.array([0.14, 0.0, 0.0]), radius=0.05)
 
     lenient = ArmSTLMonitorShield(obstacles=[obstacle], epsilon=0.0)
     action, info = lenient.select(q, [candidate, other], scores=[2.0, 1.0])

@@ -38,6 +38,42 @@ panda_frames()'s 9 points (base through flange) AND every one of
 capsule_segments()'s 8 links -- the same chain the ground-truth check
 connects.
 
+RESOLVED (2026-09-06, was "reachtube still approximates the fingertip as
+ONE conservative sphere at the flange, not the real forward-extending
+capsule ground-truth uses"): ground-truth (finger_tip_capsules()) checks
+a real capsule from the flange to the TCP (GRIPPER_TIP_OFFSET=0.14m
+ahead, along the flange's own pointing direction), radius tracking the
+REAL gripper width. The reachtube used to fold this into frame 8
+(flange)'s own point-capsule via FRAME_RADIUS[FLANGE_FRAME_INDEX] =
+GRIPPER_TIP_OFFSET + GRIPPER_TIP_RADIUS = 0.20m -- a single sphere at the
+flange, sized so it always CONTAINS the true fingertip capsule (any point
+in that capsule is within GRIPPER_TIP_OFFSET+GRIPPER_TIP_RADIUS of the
+flange by the triangle inequality) -- sound (never under-counts risk),
+but needlessly conservative in directions the fingers never actually
+reach (e.g. straight out the side of the flange, where the real capsule
+has zero extent but the old sphere still claimed the full 0.20m).
+
+Fixed by giving `propagate_arm_tube` its own real "fingertip" Capsule --
+frame 8's point-capsule itself now uses a normal joint-radius value
+(LINK_RADIUS[-1], matching how every other frame's own physical extent is
+sized -- frame 8 only borders one link, same edge case as frame 0's
+LINK_RADIUS[0]), and a NEW capsule from the flange to
+`gripper_tip_position()` (radius `model_error + w_bar + GRIPPER_TIP_
+RADIUS`) is added alongside it. Deliberately NOT gripper-width-aware
+(unlike ground-truth's finger_tip_capsules()) -- threading a future
+gripper_width through every candidate's FUTURE predicted steps would need
+simulating the gripper actuator's own dynamics, a much bigger interface
+change for a benefit that's bounded by GRIPPER_TIP_RADIUS's own already-
+conservative 0.06m (worst-case-open) allowance; this fix only tightens the
+SHAPE (sphere -> capsule), not the width-tracking, matching Category A.4's
+own documented scope decision in docs/PARAMETERS_REFERENCE.md. Only
+`arm_reach.py`'s Certify-facing reachtube is touched here --
+ArmMPCFilterShield's own separate per-frame CBF/QP linearization
+(arm_shield.py, reads FRAME_RADIUS[i] directly, not through this
+function) still uses the old flange-sphere model; out of scope for this
+fix (a different mechanism, not "Certify" in the STL sense this reachtube
+serves).
+
 RESOLVED (2026-09-05, was "Box.inflate() grows a box, not a sphere" /
 "per-point-box, not capsule-vs-capsule"): this module used to represent
 every predicted frame/link as an axis-aligned `Box` (shortstop.reach.Box),
@@ -90,7 +126,8 @@ per benchmark), not silently reused as-is.
 import numpy as np
 
 from .robot_geometry import (
-    FRAME_RADIUS, LINK_RADIUS, closest_point_on_segment, end_effector_jacobian, panda_frames,
+    FRAME_RADIUS, GRIPPER_TIP_RADIUS, LINK_RADIUS, closest_point_on_segment, end_effector_jacobian,
+    gripper_tip_position, panda_frames,
 )
 
 # CALVIN's own raw-action -> real-Cartesian-delta scale (see the module
@@ -193,15 +230,20 @@ def propagate_arm_tube(joint_angles, task_chunk, w_bar, model_error=0.02):
     ignored, see module docstring). Returns a list of length H+1: tube[0]
     is the current, exactly-known configuration (zero-radius Capsules,
     still exact points -- see below for why that's fine here);
-    tube[k] (k=1..H) is a dict keyed by BOTH:
+    tube[k] (k=1..H) is a dict keyed by:
       - frame_index (int, 0..8, matching robot_geometry.panda_frames()'s
         order: base, 7 joints, flange) -> that frame's own point Capsule
-        (a==b), and
+        (a==b),
       - ("link", i) for i in 0..7 (matching robot_geometry.
         capsule_segments()'s link ordering) -> that link's own exact
-        Capsule between its two endpoint frames.
+        Capsule between its two endpoint frames, and
+      - "fingertip" -> a Capsule from the flange to
+        robot_geometry.gripper_tip_position() (the same forward-extending
+        region ground-truth's finger_tip_capsules() checks, see module
+        docstring's 2026-09-06 entry -- fixed radius, not gripper-width-
+        aware).
     Consumers that just iterate `.values()`/`.items()` (arm_step_robustness,
-    arm_find_counterexample) automatically cover both without change.
+    arm_find_counterexample) automatically cover all three without change.
 
     `model_error` defaults *nonzero* here, unlike reach.py's Phase-1
     default of 0 -- that 0 was only valid because the 2D point-mass's
@@ -209,22 +251,32 @@ def propagate_arm_tube(joint_angles, task_chunk, w_bar, model_error=0.02):
     here is never exact, so claiming model_error=0 would be unearned.
 
     Each predicted frame's Capsule radius is `model_error + w_bar +
-    FRAME_RADIUS[i]` -- not just the disturbance/model-error bound. A
-    frame's own physical extent (FRAME_RADIUS[i], see its docstring) is
-    not a point: real collision happens at center-distance <=
-    obstacle.radius + frame_radius, so this thickness has to inflate the
-    radius the same way disturbance/model-error already did, or every
+    FRAME_RADIUS[i]` for i in 0..7 -- not just the disturbance/model-error
+    bound. A frame's own physical extent (FRAME_RADIUS[i], see its
+    docstring) is not a point: real collision happens at center-distance
+    <= obstacle.radius + frame_radius, so this thickness has to inflate
+    the radius the same way disturbance/model-error already did, or every
     downstream margin/distance check (arm_step_robustness,
     arm_find_counterexample, shortstop.calvin_experiment._clearance)
     silently treats the arm as a zero-thickness skeleton and under-counts
-    real risk. Each link's Capsule radius is `model_error + w_bar +
-    LINK_RADIUS[i]` (that link's own true physical radius, not
+    real risk. Frame 8 (flange) is the one exception: it uses
+    `LINK_RADIUS[-1]` instead of `FRAME_RADIUS[FLANGE_FRAME_INDEX]`
+    (0.06m, not 0.20m) -- FRAME_RADIUS's own 0.20m bakes in the fingertip-
+    reach inflation that's now the dedicated "fingertip" Capsule's own job
+    (see module docstring); reusing FRAME_RADIUS[8] here too would just
+    double-count that same margin at the flange point itself, without
+    tightening anything (arm_robustness_to_go takes the min over every
+    Capsule, so the old, looser flange-sphere would still dominate
+    wherever it used to). Each link's Capsule radius is `model_error +
+    w_bar + LINK_RADIUS[i]` (that link's own true physical radius, not
     FRAME_RADIUS[i]'s max-of-neighbors heuristic -- this Capsule
     represents the whole link's exact swept segment, not a junction
-    point). tube[0] is left at radius 0 (not inflated at all, no link
-    Capsules either) -- arm_robustness_to_go/arm_find_counterexample only
-    ever read tube[1:], so this is a don't-care, but flagged here so it's
-    not mistaken for an oversight if something else ever reads tube[0].
+    point). The "fingertip" Capsule's radius is `model_error + w_bar +
+    GRIPPER_TIP_RADIUS`. tube[0] is left at radius 0 (not inflated at all,
+    no link/fingertip Capsules either) -- arm_robustness_to_go/
+    arm_find_counterexample only ever read tube[1:], so this is a
+    don't-care, but flagged here so it's not mistaken for an oversight if
+    something else ever reads tube[0].
     """
     task_chunk = np.asarray(task_chunk, dtype=float)
     q = np.asarray(joint_angles, dtype=float).copy()
@@ -235,13 +287,16 @@ def propagate_arm_tube(joint_angles, task_chunk, w_bar, model_error=0.02):
         q = _step_joint_config(q, step[:3])
         frames = panda_frames(q)
         step_capsules = {
-            i: Capsule(c, c, disturbance_r + FRAME_RADIUS[i])
+            i: Capsule(c, c, disturbance_r + (LINK_RADIUS[-1] if i == len(frames) - 1 else FRAME_RADIUS[i]))
             for i, c in enumerate(frames)
         }
         step_capsules.update({
             ("link", i): Capsule(frames[i], frames[i + 1], disturbance_r + LINK_RADIUS[i])
             for i in range(len(LINK_RADIUS))
         })
+        step_capsules["fingertip"] = Capsule(
+            frames[-1], gripper_tip_position(q), disturbance_r + GRIPPER_TIP_RADIUS,
+        )
         tube.append(step_capsules)
     return tube
 

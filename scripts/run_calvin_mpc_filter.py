@@ -66,7 +66,7 @@ from shortstop.calvin_obstacle import sample_obstacle_from_reference_chunk  # no
 # shielded.py's own comments for the full reasoning/history.
 N_CANDIDATES = 8
 REPLAN_STEPS = 10
-OBSTACLE_RADIUS = 0.08
+OBSTACLE_RADIUS = 0.06
 # Must match run_calvin_unshielded.py's OBSTACLE_OFFSET_MAX exactly, not
 # sample_obstacle_from_reference_chunk's own default -- see that
 # function's docstring / calvin_obstacle_offset_floor_too_high memory for
@@ -76,24 +76,28 @@ OBSTACLE_RADIUS = 0.08
 OBSTACLE_OFFSET_MAX = 0.6
 
 # Candidate (w_bar, model_error) pairs to sweep in --tuning mode --
-# PLACEHOLDER, anchored at w_bar=0.0 (see module docstring: CALVIN's real
-# disturbance is captured end-to-end by model_error's own calibration, so
-# a separate w_bar budget is redundant, not "missing") across a spread of
-# model_error values bracketing ArmReachOnlyShield's own generic default
-# (0.02) -- revise once scripts/calibrate_arm_model_error.py has a real
-# number to anchor around instead of guessing the spread.
+# anchored at w_bar=0.0 (see module docstring: CALVIN's real disturbance
+# is captured end-to-end by model_error's own calibration, so a separate
+# w_bar budget is redundant, not "missing") across a spread bracketing
+# the REAL calibrated model_error=0.00972 (scripts/calibrate_arm_model_
+# error.py, real run 2026-09-05, n=45632 residuals, p99=0.00777*1.25 --
+# see docs/PARAMETERS_REFERENCE.md's "model_error" entry). The sweep
+# points themselves (besides 0.0 and 0.00972) are still a guessed spread,
+# not independently swept for MPC-Filter specifically.
 WBAR_MODEL_ERROR_TO_SWEEP = [
     {"w_bar": 0.0, "model_error": 0.0},
+    {"w_bar": 0.0, "model_error": 0.00972},
     {"w_bar": 0.0, "model_error": 0.02},
     {"w_bar": 0.0, "model_error": 0.05},
-    {"w_bar": 0.0, "model_error": 0.1},
 ]
 
-# Final, chosen (w_bar, model_error) -- PLACEHOLDER until a real --tuning
-# sweep (and scripts/calibrate_arm_model_error.py) pick real numbers. Only
-# read in eval mode (no --tuning flag).
+# Final, chosen (w_bar, model_error) -- model_error is the REAL
+# calibrated value (see WBAR_MODEL_ERROR_TO_SWEEP's own comment); w_bar=0.0
+# per module docstring. Only read in eval mode (no --tuning flag). Not
+# yet independently confirmed by a real --tuning sweep of ITS OWN
+# violation/success trade-off for MPC-Filter specifically.
 CHOSEN_W_BAR = 0.0
-CHOSEN_MODEL_ERROR = 0.02
+CHOSEN_MODEL_ERROR = 0.00972
 
 RUN_NAME = "calvin_mpc_filter_runs"
 

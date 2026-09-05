@@ -2,7 +2,7 @@
 wired into the CALVIN eval loop -- Propose K candidates -> reject on
 sampler-ensemble disagreement (docs/main (3).txt Sec. V.D) -> Select by
 shortstop.calvin_progress's g(a) (a kinematic goal-distance proxy, see
-that module's docstring). The privileged obstacle (radius=0.08,
+that module's docstring). The privileged obstacle (radius=0.06,
 offset_max=0.6, already tuned -- see docs/PARAMETERS_REFERENCE.md) is
 still injected exactly as in scripts/run_calvin_unshielded.py, purely for
 ground-truth measurement
@@ -97,7 +97,7 @@ REPLAN_STEPS = 10
 # run_calvin_unshielded.py had already moved its own sweep to 0.6, which
 # would have made this baseline's obstacle placement meaningfully harder
 # than the unshielded run it's supposed to be compared against.
-OBSTACLE_RADIUS = 0.08
+OBSTACLE_RADIUS = 0.06
 OBSTACLE_OFFSET_MAX = 0.6
 
 # Candidate disagreement_threshold values to sweep (meters, same units as

@@ -73,7 +73,7 @@ from shortstop.calvin_obstacle import sample_obstacle_from_reference_chunk  # no
 # shielded.py's own comments for the full reasoning/history.
 N_CANDIDATES = 8
 REPLAN_STEPS = 10
-OBSTACLE_RADIUS = 0.08
+OBSTACLE_RADIUS = 0.06
 # Must match run_calvin_unshielded.py's OBSTACLE_OFFSET_MAX exactly, not
 # sample_obstacle_from_reference_chunk's own default -- see that
 # function's docstring / calvin_obstacle_offset_floor_too_high memory for
@@ -82,10 +82,11 @@ OBSTACLE_RADIUS = 0.08
 # against (found + fixed 2026-09-06).
 OBSTACLE_OFFSET_MAX = 0.6
 
-# model_error -- PLACEHOLDER (ArmReachOnlyShield's generic default) until
-# scripts/calibrate_arm_model_error.py has run for real. w_bar=0.0 always
-# (see module docstring).
-MODEL_ERROR = 0.02
+# model_error -- REAL calibrated value (scripts/calibrate_arm_model_
+# error.py, real run 2026-09-05, n=45632 residuals, p99=0.00777*1.25 --
+# see docs/PARAMETERS_REFERENCE.md's "model_error" entry). w_bar=0.0
+# always (see module docstring).
+MODEL_ERROR = 0.00972
 
 # Candidate (epsilon, trust_region, step_size) triples to sweep in
 # --tuning mode -- PLACEHOLDER, anchored at Table VII's own defaults

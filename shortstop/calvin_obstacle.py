@@ -43,7 +43,7 @@ def _perpendicular_basis(direction_unit):
 
 
 def sample_obstacle_from_reference_chunk(
-    joint_angles, reference_chunk, radius=0.08, frame_index=None,
+    joint_angles, reference_chunk, radius=0.06, frame_index=None,
     horizon_multiplier=2, offset_max=0.6, rng=None,
 ):
     """Place an obstacle near (not exactly at) the endpoint of
@@ -115,9 +115,12 @@ def sample_obstacle_from_reference_chunk(
     script was still silently getting 0.3 from this default -- fixed by
     adding the same explicit constant everywhere).
 
-    `radius` defaults to 0.08 -- chosen 2026-09-06 (with offset_max=0.6),
-    see docs/PARAMETERS_REFERENCE.md muc 1's "radius" entry for the full
-    sweep table.
+    `radius` defaults to 0.06 -- REVISED 2026-09-06 (same day) from an
+    initial 0.08, once ArmRepairShield's own single-shot trust_region=
+    0.05m escape budget made 0.08's capture zone look too large to
+    reliably repair around -- see docs/PARAMETERS_REFERENCE.md muc 1's
+    "radius" entry for the full sweep table and the trust_region
+    reasoning.
 
     `frame_index`: which panda_frames() point (0..8) to sample from --
     defaults to the flange (FLANGE_FRAME_INDEX), i.e. the end of the

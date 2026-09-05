@@ -10,7 +10,8 @@ from shortstop.arm_reach import (
 )
 from shortstop.env import Obstacle
 from shortstop.robot_geometry import (
-    FLANGE_FRAME_INDEX, FRAME_RADIUS, LINK_RADIUS, N_JOINTS, panda_frames,
+    FLANGE_FRAME_INDEX, FRAME_RADIUS, GRIPPER_TIP_RADIUS, LINK_RADIUS, N_JOINTS, gripper_tip_position,
+    panda_frames,
 )
 
 
@@ -41,15 +42,21 @@ def test_propagate_arm_tube_zero_action_keeps_frames_at_current_position():
 
     assert len(tube) == 5  # horizon 4 + the initial (realized) entry
     for step in tube[1:]:
-        # the whole chain (9 frame capsules + 8 link capsules), not a coarser subset
-        assert set(step.keys()) == set(range(9)) | {("link", i) for i in range(8)}
+        # the whole chain (9 frame capsules + 8 link capsules + 1 fingertip
+        # capsule), not a coarser subset
+        assert set(step.keys()) == set(range(9)) | {("link", i) for i in range(8)} | {"fingertip"}
         for i in range(9):
             capsule = step[i]
             # zero disturbance/model_error -> the capsule's own point
             # doesn't move, but its radius is still the frame's own
             # physical radius (see propagate_arm_tube's docstring), not 0.
             assert np.allclose(capsule.a, capsule.b)  # a point capsule
-            assert np.isclose(capsule.radius, FRAME_RADIUS[i], atol=1e-9)
+            # frame 8 (flange) is the one exception -- LINK_RADIUS[-1], not
+            # FRAME_RADIUS[8] (which bakes in fingertip-reach inflation
+            # that's now the dedicated "fingertip" capsule's own job, see
+            # propagate_arm_tube's docstring).
+            expected_radius = LINK_RADIUS[-1] if i == 8 else FRAME_RADIUS[i]
+            assert np.isclose(capsule.radius, expected_radius, atol=1e-9)
         for i in range(8):
             capsule = step[("link", i)]
             # link capsule spans exactly the two endpoint frames, radius
@@ -57,6 +64,12 @@ def test_propagate_arm_tube_zero_action_keeps_frames_at_current_position():
             assert np.allclose(capsule.a, frames[i], atol=1e-9)
             assert np.allclose(capsule.b, frames[i + 1], atol=1e-9)
             assert np.isclose(capsule.radius, LINK_RADIUS[i], atol=1e-9)
+        # fingertip capsule spans flange -> TCP, radius exactly
+        # GRIPPER_TIP_RADIUS (zero disturbance/model_error here)
+        fingertip = step["fingertip"]
+        assert np.allclose(fingertip.a, frames[-1], atol=1e-9)
+        assert np.allclose(fingertip.b, gripper_tip_position(q), atol=1e-9)
+        assert np.isclose(fingertip.radius, GRIPPER_TIP_RADIUS, atol=1e-9)
 
 
 def test_propagate_arm_tube_inflates_with_disturbance_and_model_error():
@@ -81,7 +94,13 @@ def test_arm_robustness_to_go_matches_manual_min_over_frames_and_obstacles():
     # physical radius AND the obstacle's) are subtracted, not just the
     # obstacle's -- the old Box-based formula under-counted this (see
     # arm_reach.py's module docstring on the Box -> Capsule fix).
-    assert np.isclose(value, -(FRAME_RADIUS[FLANGE_FRAME_INDEX] + 0.05), atol=1e-6)
+    # Flange's own point-capsule now uses LINK_RADIUS[-1] (0.06m), not
+    # FRAME_RADIUS[FLANGE_FRAME_INDEX] (0.20m, which folded in fingertip
+    # reach -- now the "fingertip" capsule's own job, see propagate_arm_
+    # tube's 2026-09-06 docstring entry). The fingertip capsule ties at
+    # the same value here (obstacle sits exactly at its own "flange" end),
+    # so the binding term is unchanged either way.
+    assert np.isclose(value, -(LINK_RADIUS[-1] + 0.05), atol=1e-6)
 
 
 def test_link_box_catches_a_mid_link_collision_the_old_frame_only_check_would_miss():
@@ -144,6 +163,11 @@ def test_arm_find_counterexample_identifies_the_violating_step_and_robustness():
     # exact capsule-vs-sphere distance -- frame 8 (flange, exactly at the
     # obstacle) is unambiguously the worst violator now (no more box-
     # degeneracy tie with frame 7, since there's no box approximation
-    # left to create one -- see arm_reach.py's Box -> Capsule fix).
+    # left to create one -- see arm_reach.py's Box -> Capsule fix). The
+    # "fingertip" capsule ties at the exact same robustness value here
+    # (obstacle sits exactly at its own flange endpoint too), but frame 8
+    # was inserted into the dict first and arm_find_counterexample only
+    # replaces the best-so-far on a STRICT improvement, so the tie keeps
+    # frame 8 as the reported violator, not "fingertip".
     assert ce["frame"] == FLANGE_FRAME_INDEX
-    assert np.isclose(ce["robustness"], -(FRAME_RADIUS[FLANGE_FRAME_INDEX] + 0.05), atol=1e-6)
+    assert np.isclose(ce["robustness"], -(LINK_RADIUS[-1] + 0.05), atol=1e-6)

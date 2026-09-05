@@ -63,7 +63,7 @@ from shortstop.calvin_obstacle_viz import save_sequence_video  # noqa: E402
 # to see more of the sequence in one video.
 N_SUBTASKS = 5
 
-OBSTACLE_RADIUS = 0.08  # chosen default, see docs/PARAMETERS_REFERENCE.md muc 1's "radius" sweep table
+OBSTACLE_RADIUS = 0.06  # chosen default, see docs/PARAMETERS_REFERENCE.md muc 1's "radius" sweep table
 
 # MUST match run_calvin_unshielded.py's own REPLAN_STEPS (=10, ratio 1.0
 # against act_window_size=10 -- see that script's comment for why a

@@ -46,7 +46,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from shortstop.calvin_metrics import conservatism_cost, recovery_rate  # noqa: E402
 
 # Must match every baseline script's own OBSTACLE_RADIUS constant.
-OBSTACLE_RADIUS = 0.08
+OBSTACLE_RADIUS = 0.06
 
 BASELINES = {
     "unshielded": {
