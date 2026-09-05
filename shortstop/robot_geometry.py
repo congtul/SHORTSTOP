@@ -121,16 +121,39 @@ JOINT_LIMITS = np.array([
 # a capsule endpoint here.
 LINK_RADIUS = [0.13, 0.11, 0.10, 0.09, 0.09, 0.10, 0.11, 0.06]
 
-# panda.urdf's fixed joint chain past the flange: panda_hand_joint
-# (rotation only, zero translation -- panda_hand's origin coincides
-# exactly with the flange) then tcp_joint (translate (0,0,0.1) along
-# panda_hand's own z-axis). A translation purely along an axis is
-# unaffected by any rotation *about* that same axis, so the yaw values
-# in both fixed joints drop out of the *position* math entirely -- the
-# TCP sits GRIPPER_TIP_OFFSET further out from the flange, along
-# whichever direction the flange's own z-axis already points. See
-# gripper_tip_position().
-GRIPPER_TIP_OFFSET = 0.1
+# panda_hand_joint (rotation only, zero translation -- panda_hand's
+# origin coincides exactly with the flange) then tcp_joint (translate
+# (0,0,GRIPPER_TIP_OFFSET) along panda_hand's own z-axis). A translation
+# purely along an axis is unaffected by any rotation *about* that same
+# axis, so the yaw values in both fixed joints drop out of the *position*
+# math entirely -- the TCP sits GRIPPER_TIP_OFFSET further out from the
+# flange, along whichever direction the flange's own z-axis already
+# points. See gripper_tip_position().
+#
+# FIXED 2026-09-05 (real WSL2 run, scripts/verify_gripper_geometry_
+# against_pybullet.py): the value here was 0.1, read off the base
+# `franka_panda/panda.urdf`'s own tcp_joint (`xyz="0 0 0.1"`) -- but the
+# REAL CALVIN eval environment does not load that file. The verify
+# script's own real run discovered link indices panda_leftfinger=9
+# panda_rightfinger=11 tcp=15, which do NOT match panda.yaml's
+# gripper_joint_ids=[9,10]/tcp_link_id=13 (the plain panda.urdf) but DO
+# match `mdt_policy/calvin_env/conf/robot/panda_longer_finger.yaml`'s own
+# override (`gripper_joint_ids: [9, 11]`, `tcp_link_id: 15`) exactly --
+# proof the real robot is the "longer finger" variant
+# (`franka_panda/panda_longer_finger.urdf`), whose tcp_joint is
+# `xyz="0 0 0.14"`, not 0.1. This matches the observed discrepancy
+# exactly: the verify run's centerline-far-point check showed a constant
+# (zero-variance) 0.04000m bias = 0.14 - 0.10, while the near-point check
+# (FINGER_JOINT_Z_OFFSET, unaffected by this) was near-exact (mean
+# 0.0002m). Re-run the verify script after this fix to confirm ~0
+# discrepancy. This constant feeds gripper_tip_position(), finger_tip_
+# capsules()'s far point, AND FRAME_RADIUS[8] (below) -- and, via
+# calvin_experiment._clearance/_candidate_clearance, the GROUND-TRUTH
+# collision check every already-run baseline's violation_rate/
+# success_rate came from, which under this bug could have missed a real
+# collision in the outer 4cm of the fingertip's reach. See docs/
+# PARAMETERS_REFERENCE.md for the full downstream-impact writeup.
+GRIPPER_TIP_OFFSET = 0.14
 
 # Capsule radius for the flange->TCP segment (fingers + the part of
 # panda_hand beyond the flange -- see gripper_tip_position()'s docstring
@@ -138,13 +161,28 @@ GRIPPER_TIP_OFFSET = 0.1
 # the flange itself). finger.obj's own measured cross-section (same
 # method as LINK_RADIUS) is a mere 0.019m -- but the two fingers *also*
 # spread apart laterally up to 0.04m each side when open (panda_finger_
-# joint1/2's prismatic limit in panda.urdf), and this capsule doesn't
-# model gripper open/close state at all (a single fixed radius along the
-# centerline instead of two separate finger capsules that move with the
-# gripper's actual width). 0.04 (max one-sided finger spread) + 0.02
-# (finger's own thickness, rounded up from 0.019) = 0.06, a deliberately
-# conservative fixed bound for "gripper anywhere from fully closed to
-# fully open", not a precise measurement the way LINK_RADIUS is.
+# joint1/2's prismatic limit in panda.urdf, IDENTICAL in panda_longer_
+# finger.urdf -- confirmed, only the mesh/tcp offset differ), and this
+# capsule doesn't model gripper open/close state at all (a single fixed
+# radius along the centerline instead of two separate finger capsules
+# that move with the gripper's actual width). 0.04 (max one-sided finger
+# spread) + 0.02 (finger's own thickness, rounded up from 0.019) = 0.06,
+# a deliberately conservative fixed bound for "gripper anywhere from
+# fully closed to fully open", not a precise measurement the way
+# LINK_RADIUS is.
+#
+# RE-VERIFIED for the real "longer finger" variant (2026-09-05, same day
+# as the GRIPPER_TIP_OFFSET fix above): the longer finger uses a
+# DIFFERENT collision mesh (`meshes/collision/longer_finger_v2.obj`), so
+# this thickness measurement needed re-checking, not just assumed to
+# carry over. Same SVD method (offline, no simulator needed -- reused the
+# mesh's own vertex data directly): longer_finger_v2.obj's own max
+# perpendicular cross-section is 0.01601m (even slightly thinner than the
+# original 0.01890m) and its long-axis length is 0.09826m vs the
+# original's 0.05835m -- a ~0.04m length increase, independently
+# corroborating the same +0.04m found via GRIPPER_TIP_OFFSET/tcp_joint
+# (two different measurements, same real cause). 0.01601m still rounds up
+# to 0.02m -- GRIPPER_TIP_RADIUS=0.06 needs NO correction.
 #
 # RESOLVED for ground truth (2026-09-05, see finger_tip_capsules() below):
 # calvin_experiment._clearance now tracks the REAL current gripper width

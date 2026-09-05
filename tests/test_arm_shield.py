@@ -267,7 +267,11 @@ def test_arm_stl_monitor_shield_epsilon_is_a_real_tunable_margin_not_hardcoded_z
     other = _straight_chunk(-0.05)  # moves away -- stays admissible at every epsilon tested here
     tube = propagate_arm_tube(q, candidate, w_bar=0.0, model_error=0.0)
     endpoint = tube[-1][FLANGE_FRAME_INDEX].center()
-    obstacle = Obstacle(center=endpoint + np.array([0.25, 0.0, 0.0]), radius=0.05)
+    # Offset chosen so margin = offset - (FRAME_RADIUS[FLANGE_FRAME_INDEX] +
+    # obstacle.radius) = 0.04 exactly (0.29 - (0.20 + 0.05)) -- FRAME_RADIUS
+    # here = GRIPPER_TIP_OFFSET(0.14, fixed 2026-09-05, see robot_geometry.py)
+    # + GRIPPER_TIP_RADIUS(0.06) = 0.20.
+    obstacle = Obstacle(center=endpoint + np.array([0.29, 0.0, 0.0]), radius=0.05)
 
     lenient = ArmSTLMonitorShield(obstacles=[obstacle], epsilon=0.0)
     action, info = lenient.select(q, [candidate, other], scores=[2.0, 1.0])

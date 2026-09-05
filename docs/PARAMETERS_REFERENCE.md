@@ -251,11 +251,53 @@ Chưa có script nào đo residual thật (Jacobian pseudo-inverse) để calibr
 | `JOINT_LIMITS` | (7,2), soft limit từ `mdt_policy/calvin_env/conf/robot/panda.yaml` | **Mới 2026-09-05** — trước đây không có check joint-limit nào cả. Lưu ý: `q=0` (dùng làm placeholder tiện tính toán ở nhiều chỗ trước đây) **tự nó không hợp lệ** cho khớp 4 (`[-3.0718, -0.0698]`, toàn âm) — test suite đã đổi sang 1 pose "ready" thật (`Q_HOME` trong các file test) sau khi phát hiện điều này. |
 | `PANDA_DH` | bảng modified-DH | **Đã verify thật (2026-09-05)** — `scripts/verify_robot_geometry_against_pybullet.py` so trực tiếp `panda_frames()` với PyBullet thật của sim CALVIN (100 sample, rollout thật), sau khi fix 1 bug COM-vs-URDF-frame riêng của chính script (xem note ngay trên bảng). Kết quả: sai lệch = 0.00000m ở cả 9 frame — khớp tuyệt đối, không cần chỉnh `PANDA_DH`/`FLANGE_OFFSET`. |
 | `HAND_YAW_OFFSET`/`FINGER_JOINT_Z_OFFSET`/`FINGER_RADIUS`/`finger_tip_capsules()` | đọc trực tiếp từ `panda.urdf` | **Mới 2026-09-05** — thay `gripper_tip_position()`/`GRIPPER_TIP_RADIUS` (1 capsule cố định, luôn giả định gripper mở hết cỡ) bằng 2 finger-capsule THẬT, dùng `gripper_opening_width` thật (`obs["robot_obs_raw"][6]`) — xem mục "Category A.2/A.4" bên dưới. |
+| `GRIPPER_TIP_OFFSET` | `0.14` (**SỬA 2026-09-05, cũ = 0.1**) | Xem note "Bug GRIPPER_TIP_OFFSET" ngay dưới bảng — robot thật dùng URDF "longer finger", không phải `panda.urdf` gốc. |
 
 ### Category A.2 (Box không phải sphere) và A.4 (gripper không track mở/đóng) — ĐÃ SỬA (2026-09-05)
 
 - **A.2**: `shortstop/arm_reach.py` không còn dùng `Box` (`shortstop/reach.py`, hình lập phương) — thay bằng `Capsule` (đoạn thẳng `a`-`b` + bán kính vô hướng, `a==b` cho 1 điểm), khoảng cách tính qua `robot_geometry.point_to_segment_distance`/`closest_point_on_segment` — **chính xác tuyệt đối** (không còn over-approximation hình học), đồng thời làm luôn cho link-capsule (trước đó chỉ là AABB bao 2 box, xấp xỉ lỏng hơn capsule thật). **Phát hiện phụ khi sửa**: công thức cũ (Box) từng "quên" trừ bán kính riêng của chính box khi obstacle nằm ngay trong box (chỉ trừ `obstacle.radius`, cho kết quả nông hơn thật) — công thức Capsule mới trừ **cả 2** bán kính (capsule + obstacle), đúng bản chất signed-distance hơn, khiến 1 số giá trị robustness âm sâu hơn trước (vd. obstacle đặt đúng tâm flange: cũ báo `-0.05`, giờ đúng là `-(FRAME_RADIUS[8]+0.05)=-0.21`). Test đã cập nhật theo số liệu mới, verify lại bằng script trước khi sửa assertion.
 - **A.4**: `_clearance()`/`_candidate_clearance()` (ground truth, `calvin_experiment.py`) giờ dùng `finger_tip_capsules(joint_angles, gripper_width)` — 2 capsule ngón tay THẬT, lấy `gripper_width` thật từ `obs["robot_obs_raw"][6]` (`gripper_opening_width`, xác nhận qua chính code `calvin_env.robot.Robot.get_observation`), thay vì luôn giả định mở hết cỡ (`GRIPPER_TIP_RADIUS=0.06` cũ). **Chưa sửa cho reachtube của shield** (`propagate_arm_tube`'s `FRAME_RADIUS[8]` vẫn dùng model cũ, 1 sphere bảo thủ) — quyết định phạm vi có chủ đích: threading `gripper_width` real-time qua toàn bộ `_admissible`/`select()`/harness là thay đổi interface lớn hơn hẳn, trong khi ground-truth (quyết định `violation_rate` thật cho MỌI baseline) mới là chỗ giá trị cao nhất. Vẫn conservative (an toàn), chỉ là gap còn lại, không phải bug.
+
+**⚠️ Bug `GRIPPER_TIP_OFFSET` phát hiện + sửa 2026-09-05** (real run,
+`scripts/verify_gripper_geometry_against_pybullet.py`): near-point (finger
+joint) khớp gần đúng (mean=0.0002m, max=0.008m), nhưng centerline
+far-point (TCP) lệch **CONSTANT đúng 0.04000m** (mean=max=0.04000, zero
+variance — không phải nhiễu đo, mà là bias hệ thống). Root cause: hằng số
+`GRIPPER_TIP_OFFSET=0.1` được đọc từ `franka_panda/panda.urdf`'s
+`tcp_joint` (`xyz="0 0 0.1"`) — nhưng robot THẬT mà CALVIN eval dùng lại
+là biến thể "longer finger" (`franka_panda/panda_longer_finger.urdf`,
+`tcp_joint xyz="0 0 0.14"`), xác nhận bằng chính link index thật script
+tìm ra (`panda_leftfinger=9 panda_rightfinger=11 tcp=15`) khớp CHÍNH XÁC
+với `panda_longer_finger.yaml`'s override (`gripper_joint_ids=[9,11]`,
+`tcp_link_id=15`), không khớp `panda.yaml` gốc (`[9,10]`/`13`). Đã sửa
+`GRIPPER_TIP_OFFSET: 0.1 -> 0.14` trong `robot_geometry.py` (chi tiết đầy
+đủ trong comment ngay trên hằng số).
+
+**Hệ quả cần lưu ý**: hằng số này feed vào `gripper_tip_position()`,
+`finger_tip_capsules()`'s far point, VÀ `FRAME_RADIUS[8]` — qua
+`calvin_experiment._clearance`/`_candidate_clearance`, đây chính là
+GROUND-TRUTH collision check quyết định `violation_rate`/`success_rate`
+của MỌI baseline đã chạy (Unshielded/Conf-Thresh/STL-Monitor) VÀ
+`intervention_precision`. Dưới bug này, ground truth có thể đã bỏ sót
+va chạm thật xảy ra trong 4cm ngoài cùng của tầm với ngón tay (không
+under-count toàn bộ, chỉ vùng biên 4cm) — cần đánh giá lại mức độ ảnh
+hưởng thật (bao nhiêu % subtask từng va chạm đúng trong dải 4cm này)
+trước khi quyết định có cần chạy lại 3 baseline đã có hay không. Radius
+sweep (`OBSTACLE_RADIUS=0.08`) và Conf-Thresh threshold cũng gián tiếp
+liên quan (cùng ground-truth), thêm vào danh sách "cần review lại" đã có
+từ bug action-scale (xem mục "model_error" ở trên) — nhưng đây là 1 bug
+ĐỘC LẬP, khác nguyên nhân.
+
+**✅ Đã đo lại (2026-09-05, offline, không cần WSL2)**: `GRIPPER_TIP_RADIUS=0.06`
+đo từ `finger.obj` gốc — lo ngại ngón dài hơn dùng mesh khác
+(`longer_finger_v2.obj`) có thể có độ dày cắt ngang khác. Đo lại bằng
+đúng phương pháp SVD của `LINK_RADIUS`, trực tiếp trên file mesh (không
+cần simulator): `longer_finger_v2.obj` cho max cross-section = 0.01601m
+(còn mỏng hơn bản gốc 0.01890m một chút) và chiều dài trục dài =
+0.09826m so với bản gốc 0.05835m — dài hơn ~0.04m, khớp độc lập với
+đúng con số 0.04m đã tìm thấy qua `GRIPPER_TIP_OFFSET`/`tcp_joint` (2 phép
+đo khác nhau, cùng 1 nguyên nhân thật). 0.01601m làm tròn lên vẫn ra
+0.02m — `GRIPPER_TIP_RADIUS=0.06` KHÔNG cần sửa.
 
 ### Category obstacle-shape (X_u chỉ hỗ trợ hình cầu) — CHƯA COVER, note 2026-09-05
 
