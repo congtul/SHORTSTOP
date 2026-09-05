@@ -113,9 +113,18 @@ THRESHOLDS_TO_SWEEP = [0.15, 0.35, 0.6, 0.9]
 # and the percentiles need refreshing.
 RUN_DIAGNOSTIC = False
 
-# Final, already-chosen threshold -- PLACEHOLDER until the tuning pass
-# above actually picks tau*. Only read in eval mode (no --tuning flag).
-CHOSEN_THRESHOLD = 0.05
+# Final, already-chosen threshold -- CHOSEN 2026-09-05 from the real
+# sweep above (tuning cohort, n_sequences=100, REPLAN_STEPS=10,
+# radius=0.08): violation_rate stayed flat (0.130-0.142) across the
+# entire [0.15, 0.35, 0.6, 0.9] range regardless of activation_rate
+# (0.086-0.990) -- disagreement doesn't correlate with real safety here,
+# matching the paper's own characterization of Conf-Thresh as a weak
+# baseline ("disagreement is a poor safety proxy", 0.43 precision).
+# 0.9 is the Pareto-best of the 4 tested: violation=0.134 (near the flat
+# floor ~0.13), success=0.474 (closest to select-only/inf's 0.476),
+# activation=0.086 (still doing something, not a total no-op). Only read
+# in eval mode (no --tuning flag).
+CHOSEN_THRESHOLD = 0.9
 
 RUN_OUTPUT_DIR = REPO_ROOT / "outputs" / "calvin_shielded_runs" / (
     f"run_{datetime.now():%Y%m%d_%H%M%S}_{'tuning' if TUNING_MODE else 'eval'}"
