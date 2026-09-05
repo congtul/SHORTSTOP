@@ -378,13 +378,8 @@ def main(cfg):
     # count their own local idx from 0.
     SEQUENCE_SEED_BASE = 1000 + COHORT_OFFSET
 
-    labels_and_obstacle_fns = ([("without obstacle", None, None)] if INCLUDE_WITHOUT_OBSTACLE else []) + [
-        (
-            f"with obstacle r={r}",
-            lambda joint_angles, chunk, r=r: sample_obstacle_from_reference_chunk(joint_angles, chunk, radius=r),
-            r,
-        )
-        for r in RADII_TO_SWEEP
+    labels_and_radii = ([("without obstacle", None)] if INCLUDE_WITHOUT_OBSTACLE else []) + [
+        (f"with obstacle r={r}", r) for r in RADII_TO_SWEEP
     ]
 
     results_path = RUN_OUTPUT_DIR / "results.json"
@@ -404,10 +399,20 @@ def main(cfg):
 
     results = []
     total_videos_saved = 0
-    for label, obstacle_fn, radius in labels_and_obstacle_fns:
+    for label, radius in labels_and_radii:
         sequence_results = []
         for idx, (initial_state, eval_sequence) in enumerate(eval_sequences):
             seed_everything(SEQUENCE_SEED_BASE + idx, workers=True)
+            if radius is None:
+                obstacle_fn = None
+            else:
+                # See scripts/run_calvin_shielded.py's identical block for
+                # why this is a fresh, caller-seeded, non-global rng per
+                # sequence.
+                obstacle_rng = np.random.default_rng(SEQUENCE_SEED_BASE + idx)
+                obstacle_fn = lambda joint_angles, chunk, r=radius, rng=obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731,E501
+                    joint_angles, chunk, radius=r, rng=rng,
+                )
             attempts = run_calvin_unshielded_sequence(
                 env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
                 get_env_state_for_initial_condition, ep_len=cfg.ep_len, replan_steps=REPLAN_STEPS,
@@ -446,7 +451,7 @@ def main(cfg):
             steps_taken_stats = _violated_steps_taken_percentiles(sequence_results)
             entry["violated_steps_taken_stats"] = steps_taken_stats
             _log_violated_steps_taken_debug(label, steps_taken_stats)
-            if obstacle_fn is not None:
+            if radius is not None:
                 vis_idxs = _rank_violating_sequence_idxs_by_length(sequence_results, cfg.num_videos)
                 if not vis_idxs:
                     reason = ("no sequence violated at this radius -- radius is likely too small "
@@ -456,16 +461,28 @@ def main(cfg):
                 else:
                     video_paths = []
                     for vis_idx in vis_idxs:
+                        # Rebuilt fresh here (not reusing the main loop's
+                        # own obstacle_fn, whose rng belongs to -- and has
+                        # already been consumed by -- the LAST sequence of
+                        # the main pass) -- same seed=SEQUENCE_SEED_BASE+
+                        # vis_idx as that sequence originally got, so the
+                        # video reproduces the EXACT SAME obstacle
+                        # placement actually measured.
+                        video_obstacle_rng = np.random.default_rng(SEQUENCE_SEED_BASE + vis_idx)
+                        video_obstacle_fn = lambda joint_angles, chunk, r=radius, rng=video_obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731,E501
+                            joint_angles, chunk, radius=r, rng=rng,
+                        )
                         video_paths += _save_debug_videos(
-                            vis_idx, radius, obstacle_fn, env, policy, task_oracle, lang_embeddings, val_annotations,
-                            get_env_state_for_initial_condition, cfg, eval_sequences, SEQUENCE_SEED_BASE,
+                            vis_idx, radius, video_obstacle_fn, env, policy, task_oracle, lang_embeddings,
+                            val_annotations, get_env_state_for_initial_condition, cfg, eval_sequences,
+                            SEQUENCE_SEED_BASE,
                         )
                     total_videos_saved += len(video_paths)
                     entry["video_paths"] = video_paths
 
         results.append(entry)
         _write_progress(results)
-        _log(f"  [progress] wrote {len(results)}/{len(labels_and_obstacle_fns)} entry(ies) so far to: {results_path}")
+        _log(f"  [progress] wrote {len(results)}/{len(labels_and_radii)} entry(ies) so far to: {results_path}")
 
     if cfg.debug and total_videos_saved > 0:
         _log(f"[debug] saved {total_videos_saved} obstacle-visualization video(s) under: {VIS_OUTPUT_DIR}")

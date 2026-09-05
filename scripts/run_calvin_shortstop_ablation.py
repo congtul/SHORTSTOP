@@ -44,6 +44,7 @@ from pathlib import Path
 
 import calvin_env  # noqa: F401 -- import side effects only, matches every other CALVIN script
 import hydra
+import numpy as np
 from pytorch_lightning import seed_everything
 
 TUNING_MODE = "--tuning" in sys.argv
@@ -117,13 +118,15 @@ def _run_one_config(
     log, run_output_dir, label, shield, stage_name, params, env, policy, task_oracle, lang_embeddings,
     val_annotations, get_env_state_for_initial_condition, eval_sequences, cfg, sequence_seed_base,
 ):
-    obstacle_fn = lambda joint_angles, chunk: sample_obstacle_from_reference_chunk(  # noqa: E731
-        joint_angles, chunk, radius=OBSTACLE_RADIUS,
-    )
-
     sequence_results = []
     for idx, (initial_state, eval_sequence) in enumerate(eval_sequences):
         seed_everything(sequence_seed_base + idx, workers=True)
+        # See scripts/run_calvin_shielded.py's identical block for why
+        # this is a fresh, caller-seeded, non-global rng per sequence.
+        obstacle_rng = np.random.default_rng(sequence_seed_base + idx)
+        obstacle_fn = lambda joint_angles, chunk, rng=obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731
+            joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng,
+        )
         attempts = run_calvin_shielded_sequence(
             env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
             get_env_state_for_initial_condition, shield, ep_len=cfg.ep_len, replan_steps=REPLAN_STEPS,
@@ -187,8 +190,15 @@ def _run_one_config(
             safe_label = "".join(c for c in safe_label if c.isalnum() or c in "_")
             video_paths = []
             for vis_idx in vis_idxs:
+                # See scripts/run_calvin_shielded.py's identical block for
+                # why this is rebuilt fresh here, seeded to reproduce the
+                # exact placement that sequence actually saw.
+                video_obstacle_rng = np.random.default_rng(sequence_seed_base + vis_idx)
+                video_obstacle_fn = lambda joint_angles, chunk, rng=video_obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731,E501
+                    joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng,
+                )
                 video_paths += save_debug_videos(
-                    run_output_dir, run_output_dir / "videos", vis_idx, safe_label, obstacle_fn, shield, env,
+                    run_output_dir, run_output_dir / "videos", vis_idx, safe_label, video_obstacle_fn, shield, env,
                     policy, task_oracle, lang_embeddings, val_annotations, get_env_state_for_initial_condition,
                     cfg, eval_sequences, sequence_seed_base, REPLAN_STEPS,
                 )

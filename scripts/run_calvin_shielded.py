@@ -316,10 +316,6 @@ def _run_one_threshold(
     disagreement values during this same pass (no second re-run needed
     to harvest them) -- undone before any later (video) use of `shield`.
     """
-    obstacle_fn = lambda joint_angles, chunk: sample_obstacle_from_reference_chunk(  # noqa: E731
-        joint_angles, chunk, radius=OBSTACLE_RADIUS,
-    )
-
     original_select = shield.select
     if disagreement_sink is not None:
         def _instrumented_select(joint_angles, candidates, scores):
@@ -331,6 +327,18 @@ def _run_one_threshold(
     sequence_results = []
     for idx, (initial_state, eval_sequence) in enumerate(eval_sequences):
         seed_everything(sequence_seed_base + idx, workers=True)
+        # Built fresh per sequence, seeded by sequence_seed_base+idx -- an
+        # independent numpy Generator (does NOT touch the global numpy/
+        # torch RNG state seed_everything() just reseeded above), so the
+        # SAME random obstacle offset is reused across every baseline
+        # comparison run at this same sequence idx, while never desyncing
+        # the policy's own diffusion noise draws. See sample_obstacle_
+        # from_reference_chunk's own docstring (2026-09-05 fix) for why
+        # this must be a caller-seeded, non-global RNG.
+        obstacle_rng = np.random.default_rng(sequence_seed_base + idx)
+        obstacle_fn = lambda joint_angles, chunk, rng=obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731
+            joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng,
+        )
         attempts = run_calvin_shielded_sequence(
             env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
             get_env_state_for_initial_condition, shield, ep_len=cfg.ep_len, replan_steps=REPLAN_STEPS,
@@ -397,8 +405,19 @@ def _run_one_threshold(
         else:
             video_paths = []
             for vis_idx in vis_idxs:
+                # Rebuilt fresh here (not reusing the main loop's own
+                # obstacle_fn, whose rng belongs to -- and has already
+                # been consumed by -- the LAST sequence of the main pass)
+                # -- same seed=sequence_seed_base+vis_idx as that
+                # sequence originally got, so the video reproduces the
+                # EXACT SAME obstacle placement actually measured, not a
+                # different random draw.
+                video_obstacle_rng = np.random.default_rng(sequence_seed_base + vis_idx)
+                video_obstacle_fn = lambda joint_angles, chunk, rng=video_obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731,E501
+                    joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng,
+                )
                 video_paths += _save_debug_videos(
-                    vis_idx, threshold, obstacle_fn, shield, env, policy, task_oracle, lang_embeddings,
+                    vis_idx, threshold, video_obstacle_fn, shield, env, policy, task_oracle, lang_embeddings,
                     val_annotations, get_env_state_for_initial_condition, cfg, eval_sequences, sequence_seed_base,
                 )
             entry["video_paths"] = video_paths
