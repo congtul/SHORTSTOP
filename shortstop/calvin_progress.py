@@ -14,6 +14,16 @@ single fixed goal point the way Reach-Avoid-2D does) and has `select()`
 take `scores` as a caller-supplied argument -- this module is that
 missing piece, for CALVIN specifically.
 
+**Explicitly not an official paper definition** (confirmed 2026-09-06):
+the paper states g(a) is "a task-progress score" without giving its exact
+formula for a language-conditioned, no-single-fixed-goal domain like
+CALVIN/LIBERO -- everything below is this project's own experimental
+proposal for filling that gap, not a value being reproduced from the
+paper. Treat any g(a)-dependent result (Select's ranking, hence every
+shielded baseline that uses it) as sensitive to this specific design
+choice, not as validating or invalidating the paper's own claims about
+g(a) in the abstract.
+
 Design (Tier 1: forward-kinematics only). A physics-rollout alternative
 ("Tier 2": use PyBullet's saveState()/restoreState() to actually step
 each candidate, read the real resulting object displacement, then

@@ -120,3 +120,46 @@ def conservatism_cost(unshielded_sequence_results, shielded_sequence_results):
     unshielded_success = np.mean([u["reached"] for u, _ in benign_pairs])
     shielded_success = np.mean([s["reached"] for _, s in benign_pairs])
     return float(unshielded_success - shielded_success)
+
+
+def bootstrap_ci(sequence_results, statistic_fn, n_resamples=10_000, seed=0):
+    """Paper's own bootstrap recipe (docs/PARAMETERS_REFERENCE.md's
+    "num_sequences" entry: "bootstrap 10^4 resamples") -- estimates the
+    sampling variability of any metric from a SINGLE existing run's saved
+    `sequence_results` (e.g. loaded back from a `results.json` already on
+    disk), no extra CALVIN env/policy execution needed.
+
+    Resamples at the SEQUENCE level (draws `len(sequence_results)`
+    sequences WITH replacement, `n_resamples` times), not per-subtask-
+    attempt -- subtasks within one sequence are correlated (CALVIN's own
+    chained structure: subtask 2 only runs if subtask 1 succeeded, see
+    build_fixed_cohort_slots's own docstring), so resampling individual
+    attempts would break that correlation and understate the true
+    variance.
+
+    `statistic_fn(sequence_results_subset) -> float`: computes the metric
+    of interest on a resampled list of per-sequence attempt-lists, e.g.
+    `lambda seqs: fixed_cohort_rates(build_fixed_cohort_slots(seqs))[0]`
+    for violation_rate, or `[1]` for success_rate. Any of this module's
+    other metrics (recovery_rate, conservatism_cost -- the latter needs a
+    closure capturing the PAIRED unshielded sequence_results, resampled
+    with the SAME drawn indices) can be plugged in the same way.
+
+    Returns `(mean, std, values)`: `mean`/`std` are the ones to report as
+    "mean +/- std" (matching the paper's own Table II style); `values` is
+    the full length-`n_resamples` array, e.g. for a percentile CI
+    (`np.percentile(values, [2.5, 97.5])`) instead of a symmetric std.
+
+    This is NOT a substitute for the paper's own 5-seed protocol (running
+    the real CALVIN env/policy 5 times with different seeds) -- it only
+    quantifies the sampling uncertainty of ONE already-collected run, not
+    the additional variability a different seed's checkpoint/environment
+    draw would show. Use both together, not one instead of the other."""
+    rng = np.random.default_rng(seed)
+    n = len(sequence_results)
+    values = np.empty(n_resamples)
+    for i in range(n_resamples):
+        idx = rng.integers(0, n, size=n)
+        resampled = [sequence_results[j] for j in idx]
+        values[i] = statistic_fn(resampled)
+    return float(values.mean()), float(values.std()), values

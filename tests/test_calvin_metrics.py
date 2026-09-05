@@ -1,5 +1,7 @@
+import numpy as np
+
 from shortstop.calvin_metrics import (
-    attempted_only, build_fixed_cohort_slots, conservatism_cost, fixed_cohort_rates, recovery_rate,
+    attempted_only, bootstrap_ci, build_fixed_cohort_slots, conservatism_cost, fixed_cohort_rates, recovery_rate,
 )
 
 
@@ -100,3 +102,41 @@ def test_conservatism_cost_is_none_when_nothing_was_ever_benign():
     unshielded = [[{"violated": True, "reached": False}]]
     shielded = [[{"violated": False, "reached": False}]]
     assert conservatism_cost(unshielded, shielded) is None
+
+
+def _violation_rate_stat(sequence_results):
+    return fixed_cohort_rates(build_fixed_cohort_slots(sequence_results))[0]
+
+
+def test_bootstrap_ci_mean_matches_the_point_estimate_when_every_sequence_is_identical():
+    # No real variability across sequences -- every resample is the exact
+    # same violation_rate, so mean must equal it exactly and std must be 0.
+    sequence_results = [[{"violated": False, "reached": True}]] * 20
+    mean, std, values = bootstrap_ci(sequence_results, _violation_rate_stat, n_resamples=500, seed=0)
+    assert abs(mean - 0.0) < 1e-9
+    assert std == 0.0
+    assert len(values) == 500
+
+
+def test_bootstrap_ci_mean_is_close_to_the_point_estimate_with_real_variability():
+    # 10 sequences violated, 10 not -> point estimate violation_rate=0.5;
+    # bootstrap mean over many resamples should land close to that (law of
+    # large numbers), and std must be strictly positive (real resample-to-
+    # resample variability, unlike the identical-sequences case above).
+    violated = [{"violated": True, "reached": False}]
+    clean = [{"violated": False, "reached": True}]
+    sequence_results = [violated] * 10 + [clean] * 10
+    point_estimate = _violation_rate_stat(sequence_results)
+    mean, std, values = bootstrap_ci(sequence_results, _violation_rate_stat, n_resamples=2000, seed=0)
+    assert abs(mean - point_estimate) < 0.05
+    assert std > 0.0
+    assert values.shape == (2000,)
+
+
+def test_bootstrap_ci_is_reproducible_given_the_same_seed():
+    sequence_results = [[{"violated": True, "reached": False}]] * 5 + [[{"violated": False, "reached": True}]] * 5
+    mean_a, std_a, values_a = bootstrap_ci(sequence_results, _violation_rate_stat, n_resamples=300, seed=42)
+    mean_b, std_b, values_b = bootstrap_ci(sequence_results, _violation_rate_stat, n_resamples=300, seed=42)
+    assert mean_a == mean_b
+    assert std_a == std_b
+    assert np.array_equal(values_a, values_b)

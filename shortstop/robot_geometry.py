@@ -419,6 +419,23 @@ def end_effector_jacobian(joint_angles):
     return numerical_jacobian(joint_angles, frame_index=len(PANDA_DH) + 1)
 
 
+def gripper_tip_jacobian(joint_angles, eps=1e-6):
+    """d(gripper_tip_position)/d(joint_angles), a (3, 7) matrix -- same
+    finite-difference recipe as numerical_jacobian, but for
+    gripper_tip_position() instead of a plain panda_frames() index (the
+    TCP depends on the flange's ORIENTATION too, not just its position,
+    so it needs its own perturb-and-re-evaluate pass rather than reusing
+    numerical_jacobian(joint_angles, FLANGE_FRAME_INDEX) directly)."""
+    joint_angles = np.asarray(joint_angles, dtype=float)
+    base = gripper_tip_position(joint_angles)
+    J = np.zeros((3, N_JOINTS))
+    for i in range(N_JOINTS):
+        perturbed = joint_angles.copy()
+        perturbed[i] += eps
+        J[:, i] = (gripper_tip_position(perturbed) - base) / eps
+    return J
+
+
 def quaternion_to_rotation_matrix(quaternion):
     """pybullet's xyzw quaternion convention -> 3x3 rotation matrix, pure
     numpy (no pybullet import needed -- just the 4 components as plain
