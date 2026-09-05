@@ -441,14 +441,34 @@ def run_calvin_shielded_subtask(
     (`obs["robot_obs_raw"][14]`) before stepping, so a fallback actually
     holds the gripper instead of silently forcing it shut.
 
+    Fallback-loop mitigation (2026-09-05): a TOTAL fallback (`shield_info
+    ["fallback"]` True -- not one candidate admissible, not just a
+    partial rejection) only commits 1 real env-step of that frozen chunk
+    before the outer `while` loop re-proposes, instead of the full
+    `replan_steps` window. `policy.propose()` draws a genuinely
+    independent K-candidate sample every call (no seed reuse, see
+    mdt_policy_client.py's module docstring), so if the arm's state
+    barely changes while frozen, executing all `replan_steps` steps of
+    "stand still" before trying again just burns most of `ep_len`'s
+    budget on a state whose own sampling distribution hasn't shifted
+    enough to escape whatever got every candidate rejected (a real,
+    observed failure mode: an old pre-A/B-fix sweep showed ~90% of
+    episodes ending via `ep_len` exhaustion, neither a true violation nor
+    a success). A partial rejection still executes the full window as
+    before -- only `n_admissible==0` shrinks it.
+
     Returns everything run_calvin_unshielded_subtask returns, plus
-    'n_decisions' (how many replan cycles this subtask took) and
-    'n_activated' (how many of those decisions had the shield reject at
-    least one candidate, i.e. `not all(shield_info["admissible_mask"])` --
-    covers both partial rejection and total fallback). Feed these into a
-    *pooled* shield-activation-rate (sum(n_activated)/sum(n_decisions)
-    across every attempted subtask, not a mean of per-subtask rates -- see
-    docs/TUNING_WORKFLOW.md).
+    'n_decisions' (how many replan cycles this subtask took), 'n_activated'
+    (how many of those decisions had the shield reject at least one
+    candidate, i.e. `not all(shield_info["admissible_mask"])` -- covers
+    both partial rejection and total fallback), and 'n_fallback' (how many
+    of those decisions were a TOTAL fallback, `n_admissible==0` -- the
+    subset of `n_activated` the mitigation above actually shortens the
+    window for; lets a future run empirically check how often this path
+    is hit and whether shrinking its window actually reduces stuck/timeout
+    episodes). Feed these into a *pooled* shield-activation-rate
+    (sum(n_activated)/sum(n_decisions) across every attempted subtask, not
+    a mean of per-subtask rates -- see docs/TUNING_WORKFLOW.md).
 
     Also returns three metrics generic to every shield (not previously
     computed for any CALVIN baseline -- see docs/PARAMETERS_REFERENCE.md's
@@ -476,6 +496,7 @@ def run_calvin_shielded_subtask(
     steps_taken = 0
     n_decisions = 0
     n_activated = 0
+    n_fallback = 0
     latencies_ms = []
     rejected_total = 0
     rejected_truly_unsafe = 0
@@ -523,9 +544,24 @@ def run_calvin_shielded_subtask(
                 if clearance is not None and clearance <= 0:
                     rejected_truly_unsafe += 1
         if shield_info["fallback"]:
+            n_fallback += 1
             chunk[:, 6] = _gripper_action_from_obs(obs)
 
-        for row_idx, action_row in enumerate(chunk[:replan_steps]):
+        # A total fallback (no candidate admissible at all) only commits 1
+        # real env-step of "freeze in place" before the outer loop
+        # re-proposes, instead of the full replan_steps window -- propose()
+        # draws a genuinely independent K-candidate sample every call (no
+        # seed reuse, see mdt_policy_client.py's module docstring), so
+        # committing to `replan_steps` steps of standing still before
+        # trying again just spends most of ep_len's budget on a state that
+        # hasn't changed enough to shift the policy's own sampling
+        # distribution away from whatever got every candidate rejected.
+        # A PARTIAL rejection (shield_info["fallback"] is False, some
+        # candidate WAS admissible) still executes the full window as
+        # before -- only a total fallback shrinks it.
+        window = 1 if shield_info["fallback"] else replan_steps
+
+        for row_idx, action_row in enumerate(chunk[:window]):
             obs, _, _, current_info = env.step(_to_action_tensor(action_row))
             steps_taken += 1
 
@@ -563,7 +599,7 @@ def run_calvin_shielded_subtask(
             # chunk and re-propose immediately instead of blindly
             # executing rows that were only ever certified from the
             # nominal state assumed at the last decision.
-            remaining_chunk = chunk[row_idx + 1:replan_steps]
+            remaining_chunk = chunk[row_idx + 1:window]
             if hasattr(shield, "recertify") and len(remaining_chunk) > 0:
                 real_joint_angles = _joint_angles_from_obs(obs)
                 if not shield.recertify(real_joint_angles, remaining_chunk):
@@ -574,7 +610,7 @@ def run_calvin_shielded_subtask(
 
     result = {
         "violated": violated, "reached": reached, "min_clearance": min_clearance,
-        "n_decisions": n_decisions, "n_activated": n_activated,
+        "n_decisions": n_decisions, "n_activated": n_activated, "n_fallback": n_fallback,
         "latencies_ms": latencies_ms, "rejected_total": rejected_total,
         "rejected_truly_unsafe": rejected_truly_unsafe, "steps_taken": steps_taken,
     }

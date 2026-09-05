@@ -96,14 +96,46 @@ def _pybullet_frames(env, joint_angles):
     directly from PyBullet's own simulated robot at whatever its REAL
     current joint state happens to be (the caller is responsible for
     having already driven the sim to `joint_angles` via env.step() --
-    this function only reads, it doesn't set anything)."""
+    this function only reads, it doesn't set anything).
+
+    NOT `getLinkState(...)[0]`/`getBasePositionAndOrientation(...)[0]` --
+    those report each link's CENTER-OF-MASS frame, not the URDF joint/
+    link frame panda_frames()'s DH chain represents (confirmed: PyBullet's
+    own quickstart guide -- "position and orientation ... given in the
+    center of mass frame"; also github.com/bulletphysics/bullet3/issues/
+    2096, "get base URDF link frame position problem"). The two frames
+    coincide only when a link's <inertial><origin> offset is zero -- true
+    for a massless/fixed frame like the flange, false for a real link
+    with its own motor-housing mass distribution (elbow/forearm/etc),
+    which is exactly the pattern the first real run showed here: joints
+    1-7 off by 4-13cm (each link's own fixed inertial offset, rotated
+    into world -- constant across configs since rotation preserves the
+    offset vector's length, matching the near-zero mean/max spread
+    observed), base off by a constant 5cm, but flange within ~1mm.
+
+    Fix: for links 0-6 (the 7 joints), pass `computeForwardKinematics=1`
+    and read index 4 (`worldLinkFramePosition`, the actual URDF link
+    frame) instead of index 0. The base has no link index to query this
+    way (`getLinkState` doesn't accept -1) -- recover its URDF frame from
+    its center-of-mass pose via `getDynamicsInfo(robot_uid, -1)`'s own
+    local_inertial_pos/orn (indices 3/4), inverted and composed with the
+    COM pose (`invertTransform`/`multiplyTransforms`), the standard
+    PyBullet recipe for this exact COM<->link-frame conversion."""
     p, cid, robot = env.env.p, env.env.cid, env.env.robot
-    base = np.array(p.getBasePositionAndOrientation(robot.robot_uid, physicsClientId=cid)[0])
+
+    base_com_pos, base_com_orn = p.getBasePositionAndOrientation(robot.robot_uid, physicsClientId=cid)
+    local_inertial_pos, local_inertial_orn = p.getDynamicsInfo(robot.robot_uid, -1, physicsClientId=cid)[3:5]
+    inv_inertial_pos, inv_inertial_orn = p.invertTransform(local_inertial_pos, local_inertial_orn)
+    base_link_pos, _ = p.multiplyTransforms(base_com_pos, base_com_orn, inv_inertial_pos, inv_inertial_orn)
+    base = np.array(base_link_pos)
+
     joints = [
-        np.array(p.getLinkState(robot.robot_uid, i, physicsClientId=cid)[0])
+        np.array(p.getLinkState(robot.robot_uid, i, computeForwardKinematics=1, physicsClientId=cid)[4])
         for i in range(N_JOINTS)
     ]
-    flange = np.array(p.getLinkState(robot.robot_uid, robot.end_effector_link_id, physicsClientId=cid)[0])
+    flange = np.array(p.getLinkState(
+        robot.robot_uid, robot.end_effector_link_id, computeForwardKinematics=1, physicsClientId=cid,
+    )[4])
     return np.stack([base] + joints + [flange])
 
 

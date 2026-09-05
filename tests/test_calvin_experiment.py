@@ -393,7 +393,14 @@ def test_shielded_subtask_fallback_holds_the_gripper_instead_of_forcing_it_close
     fallback would (via HulcWrapper.step()'s real binarization, not
     exercised by this fake env) silently force the gripper closed
     regardless of its actual prior state. Checked here at the harness
-    layer directly: whatever env.step() actually received."""
+    layer directly: whatever env.step() actually received.
+
+    Also exercises the fallback-window shrink (2026-09-05): a TOTAL
+    fallback only commits 1 env-step before re-proposing, not the full
+    `replan_steps` window -- `FakeMultiCandidatePolicy` is stateless (same
+    2 candidates every call, see its own docstring) and this threshold
+    always disagrees, so EVERY decision here is a fallback -> with
+    ep_len=10 and a 1-step window, that's 10 decisions, not 1."""
     env = FakeEnv()
     env.reset()
     env.gripper_action = 0.42  # distinctive marker, neither 0 nor +-1
@@ -407,7 +414,9 @@ def test_shielded_subtask_fallback_holds_the_gripper_instead_of_forcing_it_close
         ep_len=10, replan_steps=10, obstacle_fn=None,
     )
 
-    assert result["n_activated"] == 1
+    assert result["n_decisions"] == 10  # 1-step fallback window -> 10 decisions over ep_len=10
+    assert result["n_activated"] == 10
+    assert result["n_fallback"] == 10
     assert np.isclose(env.last_gripper_action, 0.42)  # held (float32 roundtrip), not forced to 0/-1
     assert env.joint_angles[0] == 0.0  # froze in place -- fallback's position columns are 0
 
