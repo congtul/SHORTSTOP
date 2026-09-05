@@ -90,7 +90,7 @@ from mdt.evaluation.utils import get_default_beso_and_env, get_env_state_for_ini
 from mdt.utils.utils import get_last_checkpoint  # noqa: E402
 
 from shortstop.calvin_experiment import run_calvin_unshielded_sequence  # noqa: E402
-from shortstop.calvin_metrics import build_fixed_cohort_slots, fixed_cohort_rates  # noqa: E402
+from shortstop.calvin_metrics import attempted_only, build_fixed_cohort_slots, fixed_cohort_rates  # noqa: E402
 from shortstop.calvin_obstacle import sample_obstacle_from_reference_chunk  # noqa: E402
 from shortstop.calvin_obstacle_viz import save_sequence_video  # noqa: E402
 from shortstop.mdt_policy_client import ForwardOnlyPolicy  # noqa: E402
@@ -156,6 +156,35 @@ REPLAN_STEPS = 10
 # the arm get a real chance to move before this obstacle is hit", the
 # exact concern that motivated re-checking this list at all.
 RADII_TO_SWEEP = [0.0, 0.02, 0.04, 0.08, 0.12, 0.16]
+
+# sample_obstacle_from_reference_chunk's offset_max (see calvin_obstacle.py
+# docstring) -- how far off the arm's own predicted centerline the
+# obstacle gets pushed, perpendicular to the direction of travel. Bumped
+# 0.3 -> 0.6 (2026-09-05) after the RADII_TO_SWEEP run above (the FIRST
+# real run with the horizon_multiplier/offset_max self-collision fix, see
+# calvin_obstacle_self_collision_bug_fixed memory) came back with
+# violation_rate looking flat (0.190-0.198) across the ENTIRE radius
+# range -- but that flatness is a fixed-cohort-slot denominator artifact
+# (violation_rate's denominator is n_sequences*5 regardless of how many
+# subtasks actually got attempted, see calvin_metrics.build_fixed_cohort_
+# slots), NOT evidence the radius signal is dead. The real per-attempted-
+# subtask violation fraction (violated_steps_taken_stats['n'] /
+# clearance_stats['n'], both already printed by cfg.debug) is genuinely
+# monotonic across that same run: 95/182=0.522 (r=0.0) -> 97/159=0.610
+# (r=0.02) -> 98/147=0.667 (r=0.04) -> 99/124=0.798 (r=0.08) ->
+# 99/109=0.908 (r=0.12) -> 99/101=0.980 (r=0.16). The problem isn't a
+# dead signal, it's a floor that's already too high: even r=0.0 (a pure
+# point obstacle, no radius at all) already catches 52% of attempted
+# subtasks, leaving no low-violation region anywhere in this radius list
+# to contrast against. Since offset_max is the ONLY thing standing
+# between a point obstacle and a guaranteed hit (radius=0 makes the
+# obstacle's own size irrelevant), raising it is the direct lever for
+# pushing that floor down -- doubled to 0.6 as the next single-variable
+# change (horizon_multiplier left at 2, unchanged, to isolate which knob
+# moves the floor). Re-sweep RADII_TO_SWEEP with this value before
+# trusting any radius choice; see docs/PARAMETERS_REFERENCE.md's "radius"
+# entry for the full writeup.
+OBSTACLE_OFFSET_MAX = 0.6
 
 # OFF for this re-sweep (2026-09-05): confirmed neither the action-scale
 # nor the GRIPPER_TIP_OFFSET bug can touch the "without obstacle" number
@@ -411,7 +440,7 @@ def main(cfg):
                 # sequence.
                 obstacle_rng = np.random.default_rng(SEQUENCE_SEED_BASE + idx)
                 obstacle_fn = lambda joint_angles, chunk, r=radius, rng=obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731,E501
-                    joint_angles, chunk, radius=r, rng=rng,
+                    joint_angles, chunk, radius=r, rng=rng, offset_max=OBSTACLE_OFFSET_MAX,
                 )
             attempts = run_calvin_unshielded_sequence(
                 env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
@@ -422,8 +451,23 @@ def main(cfg):
 
         slots = build_fixed_cohort_slots(sequence_results, subtasks_per_sequence=5)
         violation_rate, success_rate = fixed_cohort_rates(slots)
+        attempted = attempted_only(slots)
+        # violation_rate above is over the FIXED 5*n_sequences cohort
+        # denominator (see calvin_metrics.build_fixed_cohort_slots) -- a
+        # radius that makes the chain stop earlier shrinks how many
+        # subtasks are even attempted, which can make violation_rate look
+        # flat across a radius sweep even though the real per-encounter
+        # signal is moving a lot (found 2026-09-05, see OBSTACLE_OFFSET_MAX
+        # comment above). This is the denominator-independent version:
+        # fraction of subtasks that WERE attempted that violated.
+        attempted_violation_fraction = (
+            float(np.mean([s["violated"] for s in attempted])) if attempted else None
+        )
         _log(f"[{label}] violation_rate={violation_rate:.3f}  success_rate={success_rate:.3f}"
              f"  (avg_seq_len={success_rate * 5:.2f}/5, n_sequences={cfg.num_sequences})")
+        if attempted_violation_fraction is not None:
+            _log(f"  [debug] {label}: attempted_violation_fraction={attempted_violation_fraction:.3f}"
+                 f"  ({sum(s['violated'] for s in attempted)}/{len(attempted)} attempted subtasks)")
 
         entry = {
             "label": label,
@@ -431,6 +475,7 @@ def main(cfg):
             "violation_rate": violation_rate,
             "success_rate": success_rate,
             "avg_seq_len": success_rate * 5,
+            "attempted_violation_fraction": attempted_violation_fraction,
             "n_sequences": cfg.num_sequences,
             "clearance_stats": None,
             "violated_steps_taken_stats": None,
@@ -470,7 +515,7 @@ def main(cfg):
                         # placement actually measured.
                         video_obstacle_rng = np.random.default_rng(SEQUENCE_SEED_BASE + vis_idx)
                         video_obstacle_fn = lambda joint_angles, chunk, r=radius, rng=video_obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731,E501
-                            joint_angles, chunk, radius=r, rng=rng,
+                            joint_angles, chunk, radius=r, rng=rng, offset_max=OBSTACLE_OFFSET_MAX,
                         )
                         video_paths += _save_debug_videos(
                             vis_idx, radius, video_obstacle_fn, env, policy, task_oracle, lang_embeddings,

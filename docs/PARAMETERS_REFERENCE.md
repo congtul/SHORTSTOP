@@ -182,6 +182,21 @@ Cả `horizon_multiplier=2` và `offset_max=0.3` đều là **placeholder chưa 
 
 **Chưa làm** (mở rộng riêng, không phải phần fix này): đặt obstacle gần 1 link GIỮA cánh tay (elbow/forearm, không chỉ flange) để test né va chạm toàn 7-DOF — hiện `frame_index` mặc định vẫn là flange; đổi `frame_index` sang link khác dùng được ngay cơ chế offset/horizon mới này, nhưng chưa làm thành 1 chế độ sweep riêng.
 
+**⚠️ Sweep đầu tiên với cơ chế mới (2026-09-05, `horizon_multiplier=2`/`offset_max=0.3`) — `violation_rate` trông PHẲNG (0.190→0.198 suốt `[0.0, 0.16]`), nhưng đây LÀ artifact của mẫu số cố định, KHÔNG phải tín hiệu chết**:
+
+`violation_rate` (`fixed_cohort_rates`) chia cho mẫu số CỐ ĐỊNH `n_sequences*5` bất kể radius lớn hay nhỏ (xem `calvin_metrics.build_fixed_cohort_slots`'s docstring) — radius càng lớn thì chuỗi càng dừng sớm, số subtask THỰC SỰ được thử (tử số của tỉ lệ vi phạm thật) càng nhỏ, nên `violation_rate` bị "pha loãng" và trông phẳng dù tín hiệu thật đang di chuyển rất nhiều. Tính lại tỉ lệ vi phạm TRÊN SỐ SUBTASK ĐÃ THỬ (lấy trực tiếp từ 2 dòng debug đã in sẵn — `steps_taken over N VIOLATED attempts` chia `min_clearance over N attempted subtasks`) cho một đường cong đơn điệu thật sự:
+
+| radius | violated/attempted | attempted_violation_fraction |
+|---|---|---|
+| 0.0 | 95/182 | 0.522 |
+| 0.02 | 97/159 | 0.610 |
+| 0.04 | 98/147 | 0.667 |
+| 0.08 | 99/124 | 0.798 |
+| 0.12 | 99/109 | 0.908 |
+| 0.16 | 99/101 | 0.980 |
+
+Đơn điệu tăng thật (0.522→0.980), không floor/ceiling ở giữa — nhưng **floor (0.522 ở r=0.0) quá cao**: ngay cả 1 obstacle-điểm (radius=0, không có bán kính nào cả) đã "bắt" hơn một nửa số lần thử, chỉ nhờ vào `offset_max=0.3` (thứ DUY NHẤT ngăn 1 điểm khỏi bị chạm chắc chắn ở radius=0) — nghĩa là `offset_max=0.3` chưa đủ lớn để tạo ra vùng "gần như không bao giờ chạm" mà mục tiêu tune radius cần (xem "Cách tune" phía trên: floor phải gần 0%). Đã thêm diagnostic mới (`attempted_violation_fraction`, in trực tiếp + lưu `results.json`, không cần tính tay nữa) và tăng `OBSTACLE_OFFSET_MAX` (`scripts/run_calvin_unshielded.py`) từ 0.3 lên **0.6** làm thí nghiệm tiếp theo — giữ nguyên `horizon_multiplier=2` (đổi 1 biến 1 lần). Cần sweep lại `RADII_TO_SWEEP` với `offset_max=0.6` trước khi chốt bất cứ radius nào; nếu floor ở r=0.0 vẫn cao, cân nhắc tăng tiếp hoặc xem lại cách tính hướng offset (xem `calvin_obstacle_self_collision_bug_fixed` memory).
+
 ### num_sequences / n_episodes — cỡ mẫu
 - **Không phải tham số đánh đổi chất lượng** — chỉ ảnh hưởng độ tin cậy thống kê của các metric đo được.
 - **Output cần theo dõi**: độ rộng của confidence interval (paper's own recipe: bootstrap 10^4 resamples) hoặc đơn giản là chạy lại với seed khác, xem các metric có dao động nhiều không.
