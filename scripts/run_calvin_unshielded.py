@@ -141,49 +141,46 @@ REPLAN_STEPS = 10
 # closer/more "real", the gripper-region primitive is now bigger) --
 # re-sweep from scratch, don't just re-run r=0.08.
 #
-# NEW SWEEP (2026-09-05, pending a real run): widened AND shifted down
-# from the old range, since GRIPPER_TIP_OFFSET's fix alone means even
-# radius=0 now carries a real ~0.20m margin near the gripper
-# (GRIPPER_TIP_OFFSET+GRIPPER_TIP_RADIUS = 0.14+0.06) where the old sweep
-# had 0.16 -- worth re-checking for a floor/ceiling effect at both ends
-# rather than assuming last time's "no floor at 0.02, no ceiling at 0.12"
-# still holds now that placement is realistic instead of ~50x overshot.
-# Includes 0.0 (a point obstacle) as a new baseline to isolate how much
-# violation_rate the arm's own capsule geometry alone now produces.
-# cfg.debug's steps_taken diagnostic (_violated_steps_taken_percentiles,
-# added after the LAST real sweep and never yet checked against real
-# numbers) is worth reading closely this run -- it directly answers "does
-# the arm get a real chance to move before this obstacle is hit", the
-# exact concern that motivated re-checking this list at all.
-RADII_TO_SWEEP = [0.0, 0.02, 0.04, 0.08, 0.12, 0.16]
+# RESOLVED 2026-09-06 -- real sweep with OBSTACLE_OFFSET_MAX=0.6 (see its
+# own comment below for why 0.6, not 0.3) came back non-degenerate:
+# attempted_violation_fraction climbs 0.269 (r=0.0) -> 0.329 (r=0.02) ->
+# 0.389 (r=0.04) -> 0.487 (r=0.08) -> 0.549 (r=0.12) -> 0.634 (r=0.16),
+# no floor (0.269 is a real, moderate baseline, not ~0 or saturated) or
+# ceiling (0.634 at the top of the tested range, success_rate still 0.108
+# rather than ~0) hit anywhere in this list. **Chosen: radius=0.08**
+# (attempted_violation_fraction=0.487, cohort violation_rate=0.184,
+# success_rate=0.184, avg_seq_len=0.92/5) -- same balance-point reasoning
+# as the original (now-void) 0.08 pick: violation high enough for a
+# shield to have real work to do, success_rate still clearly nonzero so
+# improvement from a shield stays visible against a nontrivial baseline.
+# Trimmed to just the chosen value; see docs/PARAMETERS_REFERENCE.md's
+# "radius" entry for the full table + tuning-cohort caveat (this was run
+# on idx 0-99 -- still needs one confirmatory eval-cohort run, idx
+# 100-199, before citing final numbers -- see feedback_tuning_cohort_split
+# memory).
+RADII_TO_SWEEP = [0.08]
 
 # sample_obstacle_from_reference_chunk's offset_max (see calvin_obstacle.py
 # docstring) -- how far off the arm's own predicted centerline the
-# obstacle gets pushed, perpendicular to the direction of travel. Bumped
-# 0.3 -> 0.6 (2026-09-05) after the RADII_TO_SWEEP run above (the FIRST
-# real run with the horizon_multiplier/offset_max self-collision fix, see
-# calvin_obstacle_self_collision_bug_fixed memory) came back with
-# violation_rate looking flat (0.190-0.198) across the ENTIRE radius
-# range -- but that flatness is a fixed-cohort-slot denominator artifact
-# (violation_rate's denominator is n_sequences*5 regardless of how many
-# subtasks actually got attempted, see calvin_metrics.build_fixed_cohort_
-# slots), NOT evidence the radius signal is dead. The real per-attempted-
-# subtask violation fraction (violated_steps_taken_stats['n'] /
-# clearance_stats['n'], both already printed by cfg.debug) is genuinely
-# monotonic across that same run: 95/182=0.522 (r=0.0) -> 97/159=0.610
-# (r=0.02) -> 98/147=0.667 (r=0.04) -> 99/124=0.798 (r=0.08) ->
-# 99/109=0.908 (r=0.12) -> 99/101=0.980 (r=0.16). The problem isn't a
-# dead signal, it's a floor that's already too high: even r=0.0 (a pure
-# point obstacle, no radius at all) already catches 52% of attempted
-# subtasks, leaving no low-violation region anywhere in this radius list
-# to contrast against. Since offset_max is the ONLY thing standing
-# between a point obstacle and a guaranteed hit (radius=0 makes the
-# obstacle's own size irrelevant), raising it is the direct lever for
-# pushing that floor down -- doubled to 0.6 as the next single-variable
-# change (horizon_multiplier left at 2, unchanged, to isolate which knob
-# moves the floor). Re-sweep RADII_TO_SWEEP with this value before
-# trusting any radius choice; see docs/PARAMETERS_REFERENCE.md's "radius"
-# entry for the full writeup.
+# obstacle gets pushed, perpendicular to the direction of travel.
+#
+# History: was 0.3 for the FIRST real run with the horizon_multiplier/
+# offset_max self-collision fix (see calvin_obstacle_self_collision_bug_
+# fixed memory); that run's violation_rate looked flat (0.190-0.198)
+# across the whole radius range, which turned out to be a fixed-cohort-
+# slot denominator artifact (see calvin_metrics.build_fixed_cohort_slots),
+# not a dead signal -- the real per-attempted-subtask violation fraction
+# was genuinely monotonic (0.522 -> 0.980) but with too-high a floor: even
+# r=0.0 (a pure point obstacle) already caught 52% of attempted subtasks,
+# since offset_max is the ONLY thing standing between a point obstacle and
+# a guaranteed hit.
+#
+# CONFIRMED 2026-09-06: bumping to 0.6 (doubled, horizon_multiplier left
+# at 2 to isolate the one variable) fixed exactly this -- floor dropped to
+# 0.269 (r=0.0), within <1pp of the 0.261 predicted by simple scaling
+# (0.522 * 0.3/0.6), confirming offset_max is the clean, correct lever for
+# floor placement (not noise). Full re-swept curve, and the radius chosen
+# from it, now live in RADII_TO_SWEEP's own comment above.
 OBSTACLE_OFFSET_MAX = 0.6
 
 # OFF for this re-sweep (2026-09-05): confirmed neither the action-scale

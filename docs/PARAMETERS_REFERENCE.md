@@ -195,7 +195,22 @@ Cả `horizon_multiplier=2` và `offset_max=0.3` đều là **placeholder chưa 
 | 0.12 | 99/109 | 0.908 |
 | 0.16 | 99/101 | 0.980 |
 
-Đơn điệu tăng thật (0.522→0.980), không floor/ceiling ở giữa — nhưng **floor (0.522 ở r=0.0) quá cao**: ngay cả 1 obstacle-điểm (radius=0, không có bán kính nào cả) đã "bắt" hơn một nửa số lần thử, chỉ nhờ vào `offset_max=0.3` (thứ DUY NHẤT ngăn 1 điểm khỏi bị chạm chắc chắn ở radius=0) — nghĩa là `offset_max=0.3` chưa đủ lớn để tạo ra vùng "gần như không bao giờ chạm" mà mục tiêu tune radius cần (xem "Cách tune" phía trên: floor phải gần 0%). Đã thêm diagnostic mới (`attempted_violation_fraction`, in trực tiếp + lưu `results.json`, không cần tính tay nữa) và tăng `OBSTACLE_OFFSET_MAX` (`scripts/run_calvin_unshielded.py`) từ 0.3 lên **0.6** làm thí nghiệm tiếp theo — giữ nguyên `horizon_multiplier=2` (đổi 1 biến 1 lần). Cần sweep lại `RADII_TO_SWEEP` với `offset_max=0.6` trước khi chốt bất cứ radius nào; nếu floor ở r=0.0 vẫn cao, cân nhắc tăng tiếp hoặc xem lại cách tính hướng offset (xem `calvin_obstacle_self_collision_bug_fixed` memory).
+Đơn điệu tăng thật (0.522→0.980), không floor/ceiling ở giữa — nhưng **floor (0.522 ở r=0.0) quá cao**: ngay cả 1 obstacle-điểm (radius=0, không có bán kính nào cả) đã "bắt" hơn một nửa số lần thử, chỉ nhờ vào `offset_max=0.3` (thứ DUY NHẤT ngăn 1 điểm khỏi bị chạm chắc chắn ở radius=0) — nghĩa là `offset_max=0.3` chưa đủ lớn để tạo ra vùng "gần như không bao giờ chạm" mà mục tiêu tune radius cần (xem "Cách tune" phía trên: floor phải gần 0%). Đã thêm diagnostic mới (`attempted_violation_fraction`, in trực tiếp + lưu `results.json`, không cần tính tay nữa) và tăng `OBSTACLE_OFFSET_MAX` (`scripts/run_calvin_unshielded.py`) từ 0.3 lên **0.6** làm thí nghiệm tiếp theo — giữ nguyên `horizon_multiplier=2` (đổi 1 biến 1 lần).
+
+**✅ Xác nhận 2026-09-06 — sweep lại với `offset_max=0.6` (tuning cohort, idx 0-99), dùng được**:
+
+| radius | violated/attempted | attempted_violation_fraction | violation_rate (cohort) | success_rate (cohort) | avg_seq_len |
+|---|---|---|---|---|---|
+| 0.0 | 76/283 | **0.269** | 0.152 | 0.398 | 1.99/5 |
+| 0.02 | 82/249 | 0.329 | 0.164 | 0.318 | 1.59/5 |
+| 0.04 | 89/229 | 0.389 | 0.178 | 0.268 | 1.34/5 |
+| **0.08 (chốt)** | **92/189** | **0.487** | **0.184** | **0.184** | **0.92/5** |
+| 0.12 | 96/175 | 0.549 | 0.192 | 0.154 | 0.77/5 |
+| 0.16 | 97/153 | 0.634 | 0.194 | 0.108 | 0.54/5 |
+
+Floor giảm đúng như dự đoán bằng scaling đơn giản: `0.522 × (0.3/0.6) = 0.261`, đo thật `0.269` — sai lệch <1pp, xác nhận `offset_max` là lever sạch, không phải nhiễu. `min_clearance` median ở r=0.0/0.02 giờ dương hẳn (+0.08/+0.06, xem `clearance_stats` trong `results.json`) thay vì sát 0 như bảng cũ — đa số lượt thử giờ thực sự "miss" thoải mái. Chưa chạm ceiling ở r=0.16 (`success_rate` vẫn 0.108, không về 0) — toàn bộ range `[0.0, 0.16]` dùng được, không cần mở rộng thêm.
+
+**Chốt: radius = 0.08** (`RADII_TO_SWEEP` đã trim về `[0.08]`) — cùng lý do balance-point như lần chọn 0.08 đầu tiên (nay đã void): `attempted_violation_fraction=0.487` gần đúng "50/50", `violation_rate`/`success_rate` cohort đều 0.184 — vi phạm đủ cao để shield có việc làm thật, success_rate còn rõ ràng khác 0 để thấy cải thiện. **Đây vẫn là số liệu tuning cohort (idx 0-99)** — theo `feedback_tuning_cohort_split`, cần 1 lần chạy xác nhận trên eval cohort (idx 100-199, không cờ `--tuning`) trước khi trích dẫn số liệu cuối cùng, giống quy trình đã áp dụng cho lần chốt 0.08 đầu tiên.
 
 ### num_sequences / n_episodes — cỡ mẫu
 - **Không phải tham số đánh đổi chất lượng** — chỉ ảnh hưởng độ tin cậy thống kê của các metric đo được.
