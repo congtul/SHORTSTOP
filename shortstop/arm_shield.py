@@ -307,23 +307,32 @@ class ArmMPCFilterShield(ArmReachOnlyShield):
          advantaged by being allowed to violate it).
 
     No soundness proof, same caveat `baselines.MPCFilterShield`'s own
-    docstring states: valid only at the ONE linearization point (the
-    policy's own nominal chunk), not iteratively re-verified (a real
-    iterative PSF would re-linearize and re-solve, SQP-style, until
-    convergence) -- documented as a real limitation, not silently
-    presented as certified the way ShortStop's own exact capsule-vs-sphere
-    reachtube is.
+    docstring states: valid only at the ONE linearization point each solve
+    used (a real iterative PSF would re-linearize and re-solve, SQP-style,
+    until convergence within a single solve) -- documented as a real
+    limitation, not silently presented as certified the way ShortStop's
+    own exact capsule-vs-sphere reachtube is. `resolve()` (below) mitigates
+    this ACROSS solves (each real step gets its own fresh linearization,
+    rather than trusting one linearization for the whole remaining
+    horizon) but chaining `select()` then `resolve()` still compounds two
+    separate single-pass linearizations -- verified numerically (tests/
+    test_arm_shield.py's own resolve tests), the resulting slack loss is
+    small (a fraction of a millimeter for a realistic case) but real, not
+    exactly zero.
 
-    Inherits `_admissible`/`_trajectory_within_joint_limits`/`recertify`
-    from ArmReachOnlyShield unchanged: recertify's job (re-check an
-    ALREADY-SELECTED chunk's remaining tail against real drift) is a
-    binary robustness>=0 + joint-limit check, identical in spirit whether
-    the chunk came from best-of-K selection or QP correction -- no new
-    logic needed, and this gets MPC-Filter the SAME filter/policy
-    frequency decoupling ArmReachOnlyShield's subclasses already have (see
-    docs/PARAMETERS_REFERENCE.md's "tach tan suat filter khoi policy"
-    table, which already lists MPC-Filter as one of the shields able to
-    do this).
+    Defines its own `resolve(joint_angles, remaining_chunk)` (2026-09-05),
+    NOT just the inherited `recertify` every other shield in this module
+    relies on -- `resolve()` genuinely RE-SOLVES the QP from the REAL
+    current state every real env-step (see its own docstring), matching
+    what "predictive safety filter" actually means in the literature
+    (receding-horizon re-optimization), rather than merely re-checking
+    whether the ORIGINAL, now-stale correction is still admissible.
+    `run_calvin_shielded_subtask` prefers `resolve` over `recertify` when
+    a shield defines both (see that harness's own docstring) -- inherited
+    `_admissible`/`_trajectory_within_joint_limits`/`recertify` stay
+    reachable (e.g. for a caller that wants the cheap binary check
+    directly) but are no longer what the harness itself calls for this
+    class.
 
     `select()`'s returned info dict deliberately marks every OTHER
     candidate (`candidates[1:]`) as trivially admissible regardless of
@@ -334,8 +343,67 @@ class ArmMPCFilterShield(ArmReachOnlyShield):
 
     def select(self, joint_angles, candidates, scores):
         del scores  # MPC-Filter corrects candidates[0] directly, never ranks -- see class docstring
-        joint_angles = np.asarray(joint_angles, dtype=float)
         nominal_chunk = np.asarray(candidates[0], dtype=float).copy()
+        corrected_position = self._solve_qp(joint_angles, nominal_chunk)
+
+        if corrected_position is None:
+            mask = [False] + [True] * (len(candidates) - 1)
+            return np.zeros_like(nominal_chunk), {
+                "fallback": True, "n_admissible": 0, "admissible_mask": mask,
+                "repair_attempted": True, "repair_succeeded": False,
+            }
+
+        chunk = nominal_chunk.copy()
+        chunk[:, :3] = corrected_position
+        intervened = not np.allclose(corrected_position, nominal_chunk[:, :3], atol=1e-6)
+        mask = [not intervened] + [True] * (len(candidates) - 1)
+        n_admissible = len(candidates) - (1 if intervened else 0)
+        return chunk, {
+            "fallback": False, "n_admissible": n_admissible, "admissible_mask": mask,
+            "intervened": intervened, "repair_attempted": intervened, "repair_succeeded": intervened,
+        }
+
+    def resolve(self, joint_angles, remaining_chunk):
+        """Re-solves the SAME QP `select()` uses, but from the REAL
+        current state (`joint_angles`, as observed after the real env has
+        just executed a row) instead of the state assumed when the
+        remaining chunk was last chosen -- and using `remaining_chunk`
+        itself (not a fresh policy proposal) as the nominal reference to
+        stay close to. This is what makes ArmMPCFilterShield a genuine
+        receding-horizon predictive safety filter rather than merely a
+        one-shot correction re-checked for staleness: the paper's own
+        Thm. 1 proof describes exactly this pattern ("only the first
+        action of a* is committed before re-deciding"), and a real PSF
+        (Wabersich & Zeilinger) re-solves at every control step, not just
+        at Propose's own cadence -- unlike `ArmReachOnlyShield.recertify`
+        (a cheap binary re-check reused unchanged by every OTHER shield
+        in this module, including this one's own inherited version, which
+        `run_calvin_shielded_subtask` only falls back to for shields
+        without a `resolve` method -- see that harness's own docstring),
+        this ACTUALLY re-optimizes, so the harness swaps in its result
+        rather than merely gating on it.
+
+        Returns a corrected `remaining_chunk`-shaped array (columns 3:
+        unchanged, matching `select()`'s own convention), or `None` if
+        this step's QP is infeasible (the harness treats `None` exactly
+        like `recertify()` returning `False`: abandon the rest of this
+        chunk, re-propose immediately)."""
+        corrected_position = self._solve_qp(joint_angles, remaining_chunk)
+        if corrected_position is None:
+            return None
+        resolved = np.asarray(remaining_chunk, dtype=float).copy()
+        resolved[:, :3] = corrected_position
+        return resolved
+
+    def _solve_qp(self, joint_angles, nominal_chunk):
+        """Shared QP core for both `select()` (nominal = the policy's own
+        top candidate) and `resolve()` (nominal = the previously-selected
+        chunk's remaining tail, re-linearized from a NEW real state) --
+        see each caller's own docstring for what differs between them.
+        Returns the corrected position columns (`nominal_chunk[:, :3]`'s
+        shape), or `None` if infeasible."""
+        joint_angles = np.asarray(joint_angles, dtype=float)
+        nominal_chunk = np.asarray(nominal_chunk, dtype=float)
         horizon = len(nominal_chunk)
 
         q_nominal = nominal_joint_trajectory(joint_angles, nominal_chunk)  # length horizon+1
@@ -379,23 +447,7 @@ class ArmMPCFilterShield(ArmReachOnlyShield):
         except cp.error.SolverError:
             a.value = None
 
-        if a.value is None:
-            mask = [False] + [True] * (len(candidates) - 1)
-            return np.zeros_like(nominal_chunk), {
-                "fallback": True, "n_admissible": 0, "admissible_mask": mask,
-                "repair_attempted": True, "repair_succeeded": False,
-            }
-
-        corrected_position = np.asarray(a.value)
-        chunk = nominal_chunk.copy()
-        chunk[:, :3] = corrected_position
-        intervened = not np.allclose(corrected_position, nominal_chunk[:, :3], atol=1e-6)
-        mask = [not intervened] + [True] * (len(candidates) - 1)
-        n_admissible = len(candidates) - (1 if intervened else 0)
-        return chunk, {
-            "fallback": False, "n_admissible": n_admissible, "admissible_mask": mask,
-            "intervened": intervened, "repair_attempted": intervened, "repair_succeeded": intervened,
-        }
+        return None if a.value is None else np.asarray(a.value)
 
     def _add_tangent_constraint(self, constraints, nominal_point, jacobian, dq_k, obstacle, physical_radius):
         direction = nominal_point - obstacle.center

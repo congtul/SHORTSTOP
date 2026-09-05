@@ -479,3 +479,93 @@ def test_shielded_subtask_recertifies_every_step_and_reproposes_early_on_failure
 
     assert result["n_decisions"] == 2
     assert np.isclose(env.joint_angles[0], 0.1 * 10)  # all 10 rows still executed, just across 2 decisions
+
+
+class FakeResolveShield:
+    """Test double isolating the harness's per-step `resolve` WIRING (does
+    it call resolve() after every executed row, actually EXECUTE the
+    chunk resolve() returns instead of the stale original, prefer it over
+    recertify when both exist, and abandon the rest of the chunk on a
+    None) from shield MATH correctness (covered by tests/test_arm_shield.py's
+    ArmMPCFilterShield.resolve() tests). select() always executes
+    candidates[0] with everything admissible. resolve() returns the
+    remaining chunk UNCHANGED for its first `switch_at` calls (0-indexed),
+    then a version with a DISTINCTIVE delta (0.5, unmistakably different
+    from FakePolicy's 0.1) from call `switch_at` onward -- and `None`
+    exactly at `fail_at` (if given), simulating an infeasible re-solve."""
+
+    def __init__(self, switch_at, fail_at=None):
+        self.switch_at = switch_at
+        self.fail_at = fail_at
+        self.n_resolve_calls = 0
+        self.n_recertify_calls = 0  # must stay 0 if resolve is defined -- see the harness's own priority
+
+    def select(self, joint_angles, candidates, scores):
+        del joint_angles, scores
+        mask = [True] * len(candidates)
+        return candidates[0], {"fallback": False, "n_admissible": len(candidates), "admissible_mask": mask}
+
+    def resolve(self, joint_angles, remaining_chunk):
+        del joint_angles
+        call_idx = self.n_resolve_calls
+        self.n_resolve_calls += 1
+        if self.fail_at is not None and call_idx == self.fail_at:
+            return None
+        if call_idx >= self.switch_at:
+            switched = remaining_chunk.copy()
+            switched[:, 0] = 0.5
+            return switched
+        return remaining_chunk
+
+    def recertify(self, joint_angles, remaining_chunk):
+        del joint_angles, remaining_chunk
+        self.n_recertify_calls += 1
+        return True
+
+
+def test_shielded_subtask_executes_resolves_result_not_the_stale_chunk():
+    """Regression test for the receding-horizon resolve() wiring
+    (2026-09-05, docs/PARAMETERS_REFERENCE.md's "tach tan suat filter khoi
+    policy" entry): resolve()'s returned chunk must actually be what gets
+    executed on later rows of this same decision, not merely checked and
+    discarded the way a boolean recertify() is. Row 0..3 execute at
+    FakePolicy's original delta=0.1 (the switch (at resolve call_idx=3,
+    fired right after executing row_idx=3) only affects chunk[4:10]
+    going forward); rows 4..9 execute at the switched delta=0.5. Also
+    confirms resolve() takes priority over recertify() when a shield
+    defines both -- recertify must never be called."""
+    env = FakeEnv()
+    env.reset()
+    policy = FakePolicy(delta=0.1, horizon=10)
+    task_oracle = FakeTaskOracleWithTasks(success_after_steps=10**9, tasks={})
+    shield = FakeResolveShield(switch_at=3)
+
+    result = run_calvin_shielded_subtask(
+        env, policy, task_oracle, FakeLangEmbeddings(), SUBTASK, VAL_ANNOTATIONS, shield,
+        ep_len=10, replan_steps=10, obstacle_fn=None,
+    )
+
+    assert result["n_decisions"] == 1  # never failed -- one decision covers all 10 rows
+    assert shield.n_resolve_calls == 9  # called after each of the first 9 rows (row 9 has no remaining tail)
+    assert shield.n_recertify_calls == 0  # resolve takes priority -- recertify never touched
+    assert np.isclose(env.joint_angles[0], 0.1 * 4 + 0.5 * 6)  # rows 0-3 at 0.1, rows 4-9 at 0.5
+
+
+def test_shielded_subtask_abandons_the_chunk_when_resolve_returns_none():
+    """resolve() returning None (infeasible re-solve) must be treated
+    exactly like recertify() returning False: abandon the rest of this
+    chunk immediately, re-propose right away -- not silently execute more
+    rows of a chunk resolve() itself just said it couldn't re-certify."""
+    env = FakeEnv()
+    env.reset()
+    policy = FakePolicy(delta=0.1, horizon=10)
+    task_oracle = FakeTaskOracleWithTasks(success_after_steps=10**9, tasks={})
+    shield = FakeResolveShield(switch_at=10**9, fail_at=3)  # never switches, fails right after row_idx=3
+
+    result = run_calvin_shielded_subtask(
+        env, policy, task_oracle, FakeLangEmbeddings(), SUBTASK, VAL_ANNOTATIONS, shield,
+        ep_len=10, replan_steps=10, obstacle_fn=None,
+    )
+
+    assert result["n_decisions"] == 2  # abandoned after row_idx=3, forcing a second decision
+    assert np.isclose(env.joint_angles[0], 0.1 * 10)  # all 10 rows still executed, just across 2 decisions

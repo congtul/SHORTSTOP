@@ -147,6 +147,77 @@ def test_arm_mpc_filter_shield_falls_back_when_the_qp_is_infeasible():
     assert np.allclose(action, np.zeros_like(chunk))
 
 
+def test_arm_mpc_filter_shield_resolve_matches_select_in_isolation():
+    """resolve() and select() share the same QP core (_solve_qp) -- called
+    with identical arguments (a real, not-yet-executed state and its own
+    full chunk as the nominal reference), they must produce the identical
+    correction. This is the isolated (non-receding) sanity check;
+    tests/test_calvin_experiment.py's resolve-wiring tests cover the
+    receding-horizon case (re-solving from a state reached mid-chunk)."""
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+    shield = ArmMPCFilterShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0)
+
+    selected_action, _ = shield.select(q, [chunk], scores=[1.0])
+    resolved = shield.resolve(q, chunk)
+
+    assert resolved is not None
+    assert np.allclose(resolved, selected_action, atol=1e-6)
+
+
+def test_arm_mpc_filter_shield_resolve_reoptimizes_from_a_genuinely_drifted_real_state():
+    """The receding-horizon case resolve() exists for, mirroring EXACTLY
+    what the real harness does (run_calvin_shielded_subtask): select()
+    picks this decision's chunk, row 0 gets executed for real, then
+    resolve() re-solves the REMAINING TAIL OF THE ALREADY-CORRECTED CHUNK
+    (not the original uncorrected nominal) from the REAL resulting state.
+
+    The result must be genuinely admissible from that real state -- but
+    verified numerically (not assumed): chaining select() then resolve()
+    means TWO separate linearization passes (each one exact only at its
+    own nominal point, see ArmMPCFilterShield's own docstring), so a
+    small amount of slack can compound across them. Real measured value
+    for this exact scenario: ~-0.00068 (well under a millimeter) -- a
+    genuine, expected characteristic of chaining single-linearization-pass
+    corrections, not a sign resolve() is broken. Asserting >= -1e-3 (1mm)
+    catches an actual regression (a much larger, unbounded error) without
+    being a false ">=0 always" claim this single-pass design doesn't
+    make."""
+    q_original = Q_HOME
+    chunk = _straight_chunk(0.05, horizon=6)
+    tube = propagate_arm_tube(q_original, chunk, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+    shield = ArmMPCFilterShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0)
+
+    selected, select_info = shield.select(q_original, [chunk], scores=[1.0])
+    assert select_info["intervened"] is True
+
+    # Row 0 of the CORRECTED chunk executed for real -> the real state
+    # resolve() must adapt to (not the original uncorrected nominal's).
+    real_trajectory = nominal_joint_trajectory(q_original, selected[:1])
+    q_drifted = real_trajectory[1]
+    remaining = selected[1:]
+
+    resolved = shield.resolve(q_drifted, remaining)
+
+    assert resolved is not None
+    assert not np.allclose(resolved[:, :3], remaining[:, :3], atol=1e-6)  # genuinely re-optimized, not a no-op
+    corrected_tube = propagate_arm_tube(q_drifted, resolved, w_bar=0.0, model_error=0.0)
+    assert arm_robustness_to_go(corrected_tube, [obstacle]) >= -1e-3
+
+
+def test_arm_mpc_filter_shield_resolve_returns_none_when_infeasible():
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=5.0)
+    shield = ArmMPCFilterShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0)
+
+    assert shield.resolve(q, chunk) is None
+
+
 def test_arm_stl_monitor_shield_picks_highest_score_among_admissible():
     q = Q_HOME
     a = _straight_chunk(0.05)

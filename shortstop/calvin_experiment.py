@@ -419,16 +419,37 @@ def run_calvin_shielded_subtask(
     Filter freq decoupled from policy freq for shields that support it:
     Propose (K diffusion samples, expensive) still only runs every
     `replan_steps` env-steps, but after EVERY executed row this harness
-    also calls `shield.recertify(real_joint_angles, remaining_chunk)` (if
-    the shield defines it -- ArmSTLMonitorShield/ArmRepairShield via
-    ArmReachOnlyShield.recertify, not ArmConfThreshShield) to re-check the
-    already-committed chunk's remaining tail against the REAL state just
-    reached, not the nominal one assumed when it was selected. If that
-    fails, the rest of the chunk is abandoned immediately and the outer
-    loop re-proposes right away, instead of waiting up to `replan_steps`
-    steps to notice real-world drift a shield could have caught sooner
-    for free (no extra K-sample cost). `hasattr(shield, "recertify")` is a
-    no-op for shields without it, so ArmConfThreshShield keeps executing
+    also re-checks the already-committed chunk's remaining tail against
+    the REAL state just reached, not the nominal one assumed when it was
+    selected -- one of two ways, depending on what the shield defines
+    (checked in this priority order, `resolve` first):
+      - `shield.resolve(real_joint_angles, remaining_chunk)` (e.g.
+        ArmMPCFilterShield -- see its own docstring for why a real
+        predictive safety filter needs this instead of a cheap boolean
+        check: it genuinely RE-OPTIMIZES from the real current state
+        every step, not just re-verifies a now-stale correction). Returns
+        a corrected `remaining_chunk`-shaped array, or `None` if
+        infeasible. When it returns an array, this harness SWAPS it into
+        `chunk`'s own remaining rows in place (`chunk[row_idx+1:window]
+        = resolved`) -- relies on `chunk[:window]` being a numpy VIEW
+        sharing memory with `chunk` (plain slicing, not a copy), so the
+        `for row_idx, action_row in enumerate(chunk[:window])` loop's
+        LATER iterations read the newly-resolved rows, not the stale
+        ones from this decision's original Propose/select call
+        (confirmed this is how numpy iteration over a mutated shared
+        buffer behaves, not assumed). `None` is treated exactly like
+        `recertify()` returning `False` below.
+      - `shield.recertify(real_joint_angles, remaining_chunk)` (only if
+        the shield has no `resolve` -- ArmSTLMonitorShield/ArmRepairShield
+        via ArmReachOnlyShield.recertify, not ArmConfThreshShield): a
+        cheap binary check (robustness>=0 + joint limits) of the SAME
+        rows that would otherwise still be executed -- if it fails, the
+        rest of the chunk is abandoned and the outer loop re-proposes
+        right away, instead of waiting up to `replan_steps` steps to
+        notice real-world drift a shield could have caught sooner for
+        free (no extra K-sample cost either way).
+    Neither `hasattr` check fires for a shield with no `resolve`/
+    `recertify` at all (e.g. ArmConfThreshShield), which keeps executing
     the full `replan_steps` window uninterrupted, exactly as before.
 
     Gripper-fallback fix: `shield.select()`'s fallback action is
@@ -589,21 +610,29 @@ def run_calvin_shielded_subtask(
 
             # Decouple filter freq from policy freq (docs/PARAMETERS_
             # REFERENCE.md's "tach tan suat filter khoi policy" entry):
-            # for shields whose Certify step doesn't need a fresh
-            # K-candidate sample (any shield with a `recertify` method --
-            # ArmSTLMonitorShield/ArmRepairShield, not ArmConfThreshShield),
-            # re-check the chunk's remaining tail against the REAL state
-            # we just landed in, every real env-step -- not just at the
-            # next `replan_steps` boundary. If the real (possibly-drifted)
-            # trajectory no longer certifies, abandon the rest of this
-            # chunk and re-propose immediately instead of blindly
-            # executing rows that were only ever certified from the
-            # nominal state assumed at the last decision.
+            # re-check/re-optimize the chunk's remaining tail against the
+            # REAL state we just landed in, every real env-step -- not
+            # just at the next `replan_steps` boundary. `resolve` takes
+            # priority over `recertify` (see this function's own
+            # docstring for why -- a shield with `resolve`, e.g.
+            # ArmMPCFilterShield, genuinely re-optimizes; one with only
+            # `recertify` just re-verifies). Neither fires for a shield
+            # with neither (e.g. ArmConfThreshShield).
             remaining_chunk = chunk[row_idx + 1:window]
-            if hasattr(shield, "recertify") and len(remaining_chunk) > 0:
+            if len(remaining_chunk) > 0:
                 real_joint_angles = _joint_angles_from_obs(obs)
-                if not shield.recertify(real_joint_angles, remaining_chunk):
-                    break
+                if hasattr(shield, "resolve"):
+                    resolved = shield.resolve(real_joint_angles, remaining_chunk)
+                    if resolved is None:
+                        break
+                    # Mutates the SAME buffer `chunk[:window]` is a view
+                    # over -- the outer `for` loop's later iterations will
+                    # read these new values, not the stale ones from this
+                    # decision's original Propose/select call.
+                    chunk[row_idx + 1:window] = resolved
+                elif hasattr(shield, "recertify"):
+                    if not shield.recertify(real_joint_angles, remaining_chunk):
+                        break
 
         if violated or reached:
             break
