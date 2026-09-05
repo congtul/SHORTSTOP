@@ -101,48 +101,51 @@ OBSTACLE_RADIUS = 0.08
 OBSTACLE_OFFSET_MAX = 0.6
 
 # Candidate disagreement_threshold values to sweep (meters, same units as
-# the endpoint-vs-centroid distance ArmConfThreshShield computes) --
-# REVISED 2026-09-05 from the diagnostic pass's real percentiles (real
-# run, n_sequences=100, REPLAN_STEPS=10, radius=0.08): disagreement over
-# 17856 candidate-level values -- mean=0.368 median=0.349 p10=0.146
-# p90=0.609 p99=0.906 min=0.003 max=1.387. The original placeholder
-# [0.02, 0.05, 0.1] was far below even p10 -- every one of them rejected
-# essentially every candidate (shield_activation_rate 0.996-1.0,
-# success_rate ~0), so no real tradeoff curve was visible. Spans p10 ->
-# median -> p90 -> p99 this time to actually see violation/success/
-# activation move. Only read in --tuning mode.
-THRESHOLDS_TO_SWEEP = [0.15, 0.35, 0.6, 0.9]
-
-# Skip Phase 1 (disagreement_threshold=inf diagnostic) in --tuning runs --
-# it's fully deterministic given the same cohort/checkpoint/K/radius/
-# REPLAN_STEPS, so re-running it just reproduces the same percentiles
-# already used to pick THRESHOLDS_TO_SWEEP above (real numbers logged
-# there). Flip back to True if K/radius/REPLAN_STEPS/checkpoint change
-# and the percentiles need refreshing.
-RUN_DIAGNOSTIC = False
-
-# Final, already-chosen threshold -- CHOSEN 2026-09-05 from the real
-# sweep above (tuning cohort, n_sequences=100, REPLAN_STEPS=10,
-# radius=0.08): violation_rate stayed flat (0.130-0.142) across the
-# entire [0.15, 0.35, 0.6, 0.9] range regardless of activation_rate
-# (0.086-0.990) -- disagreement doesn't correlate with real safety here,
-# matching the paper's own characterization of Conf-Thresh as a weak
-# baseline ("disagreement is a poor safety proxy", 0.43 precision).
-# 0.9 is the Pareto-best of the 4 tested: violation=0.134 (near the flat
-# floor ~0.13), success=0.474 (closest to select-only/inf's 0.476),
-# activation=0.086 (still doing something, not a total no-op). Only read
-# in eval mode (no --tuning flag).
+# the endpoint-vs-centroid distance ArmConfThreshShield computes).
 #
-# CONFIRMED 2026-09-05 on the held-out eval cohort (idx 100-199, same
-# REPLAN_STEPS=10/radius=0.08/threshold=0.9): violation_rate=0.140,
-# success_rate=0.466, shield_activation_rate=0.074, avg_seq_len=2.33/5
-# (n=307 attempted subtasks; clearance mean=0.204 median=0.184 p10=-0.057
-# p90=0.515 min=-0.204 max=0.638) -- nearly identical to the tuning-cohort
-# numbers above (violation 0.134->0.140, success 0.474->0.466), same
-# minor-bias pattern already seen for the unshielded baseline (see
-# docs/PARAMETERS_REFERENCE.md). THESE eval-cohort numbers are the ones
-# to cite as Conf-Thresh's final reported result, not the tuning-cohort
-# ones above.
+# STALE (2026-09-06) -- everything below (the percentiles, the 4-point
+# list, CHOSEN_THRESHOLD and its eval-cohort confirmation) was measured
+# BEFORE the CALVIN_ACTION_SCALE fix (see arm_reach.py / docs/PARAMETERS_
+# REFERENCE.md's "model_error" entry) -- `ArmConfThreshShield._endpoint()`
+# calls `propagate_arm_tube`, the EXACT function that fix touched, so the
+# old percentiles (mean=0.368 median=0.349 p10=0.146 p90=0.609 p99=0.906
+# min=0.003 max=1.387, n=17856) were measured on a candidate-endpoint
+# spread ~50x too large (the same ratio CALVIN_ACTION_SCALE=0.02
+# corrects). Also predates the g(a) base-frame fix, the obstacle self-
+# collision fix, and the offset_max fairness fix -- none of those touch
+# `_endpoint()`'s own geometry, but they do change what episode state
+# each decision sees, so a from-scratch re-sweep is the only safe option
+# here, not a reuse of the old list.
+#
+# Naive rescaling predicts the new distribution lands around
+# old_value/50 -- roughly p10~0.003, median~0.007, p90~0.012, p99~0.018,
+# max~0.028. That's an ESTIMATE (this ratio assumes the ONLY thing that
+# changed is CALVIN_ACTION_SCALE, which is true for this specific
+# computation, but hasn't been measured for real yet). To avoid the same
+# "guessed range was entirely off the real distribution, needed a second
+# --tuning run after seeing the diagnostic" failure mode from before
+# (also hit while tuning STL-Monitor/epsilon) in a single pass this time,
+# this list DELIBERATELY spans both the predicted new low range AND the
+# old high range as a hedge -- whichever regime turns out real, at least
+# several points should land inside the actual distribution on this
+# FIRST run. RUN_DIAGNOSTIC=True below logs the real percentiles from
+# THIS run regardless, to confirm/refute the /50 estimate directly.
+THRESHOLDS_TO_SWEEP = [0.003, 0.007, 0.012, 0.02, 0.03, 0.15, 0.35, 0.9]
+
+# Re-enabled 2026-09-06 (was False) -- the old percentiles this flag's
+# "already logged, no need to reproduce" reasoning relied on are exactly
+# the ones now stale (see THRESHOLDS_TO_SWEEP's own comment). Needs a
+# real diagnostic pass again to get trustworthy percentiles under the
+# current, fully-fixed pipeline. Flip back to False once this run's real
+# percentiles are captured in a comment here, same pattern as before.
+RUN_DIAGNOSTIC = True
+
+# PLACEHOLDER (2026-09-06) -- the previously-chosen 0.9 and its eval-
+# cohort confirmation (violation=0.140/success=0.466) are STALE for the
+# same reasons as THRESHOLDS_TO_SWEEP above; kept only as the prior
+# baseline's value until a fresh --tuning sweep (this widened list) picks
+# a real one. Only read in eval mode (no --tuning flag) -- do NOT run eval
+# with this value before re-tuning on the widened sweep above.
 CHOSEN_THRESHOLD = 0.9
 
 RUN_OUTPUT_DIR = REPO_ROOT / "outputs" / "calvin_shielded_runs" / (
