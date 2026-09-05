@@ -5,14 +5,19 @@ from shortstop.robot_geometry import (
     FRAME_RADIUS,
     GRIPPER_TIP_OFFSET,
     GRIPPER_TIP_RADIUS,
+    JOINT_LIMITS,
     LINK_RADIUS,
     N_JOINTS,
     capsule_segments,
     end_effector_jacobian,
+    finger_tip_capsules,
     gripper_tip_position,
     numerical_jacobian,
     panda_frames,
     point_to_segment_distance,
+    to_local_frame,
+    to_world_frame,
+    within_joint_limits,
 )
 
 
@@ -123,6 +128,61 @@ def test_gripper_tip_position_is_exactly_offset_beyond_the_flange():
 
     # exactly GRIPPER_TIP_OFFSET further out, regardless of joint config
     assert np.isclose(np.linalg.norm(tip - flange), GRIPPER_TIP_OFFSET)
+
+
+def test_within_joint_limits_accepts_a_valid_config_and_rejects_an_out_of_range_joint():
+    # a real, well-within-limits Franka "ready" pose -- NOT all-zeros:
+    # joint 4 (index 3)'s own real range is entirely negative
+    # ([-3.0718, -0.0698], see JOINT_LIMITS), so q=0 is itself already
+    # physically invalid for that joint alone -- not a usable "valid"
+    # baseline for this test.
+    q_home = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
+    assert within_joint_limits(q_home) is True
+
+    q = q_home.copy()
+    q[1] = JOINT_LIMITS[1, 1] + 0.1  # push joint 1 just past its upper bound
+    assert within_joint_limits(q) is False
+
+    q = q_home.copy()
+    q[3] = JOINT_LIMITS[3, 0] - 0.1  # push joint 4 just past its lower bound
+    assert within_joint_limits(q) is False
+
+
+def test_to_local_frame_is_the_exact_inverse_of_to_world_frame():
+    base_position = [-0.34, -0.46, 0.24]  # calvin_scene_D.yaml's real robot_base_position
+    base_orientation = [0.0, 0.0, 0.0, 1.0]  # identity rotation (scene A-D's own convention)
+    local_point = np.array([1.0, 2.0, 3.0])
+
+    world_point = to_world_frame(local_point, base_position, base_orientation)
+    assert np.allclose(world_point, np.array(base_position) + local_point)  # identity rotation -> pure translation
+    assert np.allclose(to_local_frame(world_point, base_position, base_orientation), local_point)
+
+
+def test_to_local_frame_inverts_a_real_rotation_too():
+    base_position = [0.3, 0.15, 0.6]
+    quarter_turn_z = [0.0, 0.0, np.sin(np.pi / 4), np.cos(np.pi / 4)]  # 90 deg about z, xyzw convention
+    local_point = np.array([1.0, 0.0, 0.0])
+
+    world_point = to_world_frame(local_point, base_position, quarter_turn_z)
+    assert np.allclose(to_local_frame(world_point, base_position, quarter_turn_z), local_point, atol=1e-9)
+
+
+def test_finger_tip_capsules_coincide_with_gripper_tip_position_when_closed():
+    q = np.random.default_rng(7).uniform(-0.3, 0.3, size=N_JOINTS)
+    (left_near, left_far), (right_near, right_far) = finger_tip_capsules(q, gripper_width=0.0)
+    tip = gripper_tip_position(q)
+    # closed (width=0) -- both fingers collapse onto the same centerline
+    # axis gripper_tip_position() itself uses.
+    assert np.allclose(left_near, right_near)
+    assert np.allclose(left_far, tip)
+    assert np.allclose(right_far, tip)
+
+
+def test_finger_tip_capsules_separate_by_the_real_gripper_width_when_open():
+    q = np.random.default_rng(7).uniform(-0.3, 0.3, size=N_JOINTS)
+    (left_near, left_far), (right_near, right_far) = finger_tip_capsules(q, gripper_width=0.08)
+    assert np.isclose(np.linalg.norm(left_near - right_near), 0.08)
+    assert np.isclose(np.linalg.norm(left_far - right_far), 0.08)
 
 
 def test_gripper_tip_position_direction_tracks_flange_orientation():

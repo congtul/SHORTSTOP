@@ -3,7 +3,7 @@ import functools
 import numpy as np
 
 from shortstop.calvin_progress import calvin_progress_scores
-from shortstop.robot_geometry import N_JOINTS, panda_frames
+from shortstop.robot_geometry import N_JOINTS, panda_frames, to_world_frame
 
 
 class _FakeTaskOracle:
@@ -46,6 +46,50 @@ def test_prefers_the_candidate_whose_predicted_endpoint_is_closer_to_the_target_
     scores = calvin_progress_scores(task_oracle, "push_red_block_right", current_info, q0, [toward, away], replan_steps=4)
 
     assert scores[0] > scores[1]
+
+
+def test_corrects_for_the_real_nonzero_robot_base_offset_not_just_identity():
+    """Regression test for the base-frame bug (2026-09-05): propagate_arm_
+    tube's predicted_flange lives in the robot's own LOCAL base frame,
+    but CALVIN reports a real scene object's current_pos in true WORLD
+    coordinates -- and the real CALVIN scenes (calvin_scene_A/B/C/D.yaml)
+    do NOT place the robot base at the world origin
+    (robot_base_position=[-0.34,-0.46,0.24]). `target_local` here is
+    IDENTICAL to the first test above's own target (0.1m ahead of the
+    start pose along +x, in local coordinates) -- but expressed to
+    calvin_progress_scores as CALVIN really would, in world coordinates
+    (to_world_frame'd through that same real base offset). Passing the
+    correct base_position/base_orientation must recover the exact same
+    ranking as the local-frame test (`toward` wins); passing the
+    identity default (the pre-fix behavior) on this same world-frame
+    target gets the ranking BACKWARDS -- demonstrating this is a real,
+    not just cosmetic, correction."""
+    q0 = np.zeros(N_JOINTS)
+    start_local = panda_frames(q0)[-1]
+    target_local = start_local + np.array([0.1, 0.0, 0.0])
+
+    base_position = [-0.34, -0.46, 0.24]  # calvin_scene_D.yaml's real robot_base_position
+    base_orientation = [0.0, 0.0, 0.0, 1.0]
+    target_world = to_world_frame(target_local, base_position, base_orientation)
+
+    task_oracle = _FakeTaskOracle({"push_red_block_right": _partial("block_red", 0.1, 0)})
+    current_info = _scene_info_with(movable_objects={"block_red": {"current_pos": target_world.tolist()}})
+
+    toward = np.zeros((4, 7))
+    toward[:, 0] = 0.02
+    away = np.zeros((4, 7))
+    away[:, 0] = -0.02
+
+    correct = calvin_progress_scores(
+        task_oracle, "push_red_block_right", current_info, q0, [toward, away], replan_steps=4,
+        base_position=base_position, base_orientation=base_orientation,
+    )
+    assert correct[0] > correct[1]  # toward wins, matching the pure-local-frame test above
+
+    uncorrected = calvin_progress_scores(
+        task_oracle, "push_red_block_right", current_info, q0, [toward, away], replan_steps=4,
+    )  # identity default applied to a genuinely world-frame target -- the old, buggy behavior
+    assert uncorrected[0] < uncorrected[1]  # ranking flips backwards without the fix
 
 
 def test_scores_only_the_first_replan_steps_rows_not_the_full_chunk():

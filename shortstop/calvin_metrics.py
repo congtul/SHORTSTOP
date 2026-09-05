@@ -67,3 +67,56 @@ def attempted_only(slots):
     incidence rates, so they should not use the fixed-500 denominator.
     """
     return [s for s in slots if s["attempted"]]
+
+
+def recovery_rate(sequence_results):
+    """Fraction of subtask attempts where the shield activated
+    (`n_activated > 0` -- at least one decision rejected something) that
+    still ended in `reached=True`. The paper's own definition ("fraction
+    of rejected-chunk situations from which the task is still completed,
+    isolating the value of repair vs bare rejection") -- deliberately
+    GENERAL, not gated on a repair mechanism existing, unlike
+    shortstop.metrics.aggregate's narrower `repair_successes/
+    repair_attempts` ratio (which stays `None` for any shield whose
+    select() doesn't report those specific keys, e.g. ArmSTLMonitorShield/
+    ArmConfThreshShield -- yet the paper reports a real recovery_rate for
+    both of those in Table II, so that narrower definition can't be what's
+    meant there). `sequence_results`: list of per-sequence subtask-attempt
+    lists, each dict needs 'n_activated'/'reached' (see
+    shortstop.calvin_experiment.run_calvin_shielded_subtask's result).
+    `None` if no subtask attempt ever activated the shield at all (nothing
+    to compute a rate over)."""
+    activated = [
+        a for attempts in sequence_results for a in attempts
+        if a.get("n_activated", 0) > 0
+    ]
+    if not activated:
+        return None
+    return float(np.mean([a["reached"] for a in activated]))
+
+
+def conservatism_cost(unshielded_sequence_results, shielded_sequence_results):
+    """Success-rate drop the shield causes on subtask attempts where the
+    PAIRED unshielded run had no true violation -- mirrors
+    shortstop.metrics.conservatism_cost's definition (see its docstring)
+    at CALVIN's subtask-attempt granularity. Requires
+    unshielded_sequence_results[i] and shielded_sequence_results[i] to
+    come from the SAME sequence (same seed/cohort index) for every i --
+    true for any 2 CALVIN scripts sharing the tuning/eval cohort
+    convention (see docs/TUNING_WORKFLOW.md muc 0). A sequence can stop
+    at a different subtask in each run (early failure/violation) -- only
+    subtask positions BOTH runs actually attempted are compared; extra
+    trailing attempts on either side are simply not part of the pairing.
+    `None` if no paired, benign subtask attempt exists at all."""
+    benign_pairs = []
+    for seq_idx, unshielded_attempts in enumerate(unshielded_sequence_results):
+        shielded_attempts = shielded_sequence_results[seq_idx]
+        for subtask_idx, u in enumerate(unshielded_attempts):
+            if subtask_idx >= len(shielded_attempts) or u["violated"]:
+                continue
+            benign_pairs.append((u, shielded_attempts[subtask_idx]))
+    if not benign_pairs:
+        return None
+    unshielded_success = np.mean([u["reached"] for u, _ in benign_pairs])
+    shielded_success = np.mean([s["reached"] for _, s in benign_pairs])
+    return float(unshielded_success - shielded_success)

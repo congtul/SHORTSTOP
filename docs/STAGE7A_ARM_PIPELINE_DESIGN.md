@@ -94,19 +94,29 @@ literature thật làm cho tay máy**. Đã tìm và trích dẫn cụ thể:
   cách closed-form, rẻ, real-time được — nhưng cho **nhiều điểm dọc cánh
   tay**, không phải 1 điểm.
 
-Implementation ở đây: 4 sphere (elbow/forearm/wrist/gripper) theo forward-
-kinematics thật của Panda (`robot_geometry.py`, DH table modified-DH --
-**đã verify khớp với URDF thật của `mdt_policy/calvin_env`'s
-`franka_panda/panda.urdf`**, từng hàng DH đối chiếu đúng với `<origin>`
-của từng joint). Bán kính sphere (`SPHERE_RADII = [0.09, 0.10, 0.06,
-0.05]`) **đã đo từ mesh collision thật** (không còn placeholder) --
+**Cập nhật 2026-09-05 -- đoạn dưới đây đã lỗi thời trên 2 điểm**: (1) API
+đã đổi -- không còn `SPHERE_RADII`/4-sphere, đã thay bằng `LINK_RADIUS`
+(8 giá trị) + `capsule_segments()` phủ **toàn bộ** 8 link, không phải 1
+subset 4 điểm; (2) claim "đã verify khớp URDF thật" cho DH table
+**không chính xác** -- cái đã làm chỉ là so tay vài hằng số DH (d/a) với
+`<origin>` của URDF, không phải so sánh FK/pose thật. Xem
+`docs/PARAMETERS_REFERENCE.md` mục 8 (đã sửa) và
+`scripts/verify_robot_geometry_against_pybullet.py` (verify thật, so
+`panda_frames()` trực tiếp với `p.getLinkState()` của sim CALVIN -- viết
+xong, chưa chạy, cần WSL2) cho hiện trạng đúng.
+
+Implementation ở đây: forward-kinematics thật của Panda (`robot_geometry.py`,
+DH table modified-DH). Bán kính link (`LINK_RADIUS`, đo cho cả 8 link,
+không chỉ 4) **đã đo từ mesh collision thật** (không còn placeholder) --
 phương pháp: max bán kính cắt ngang vuông góc trục dài nhất (SVD) của
 mesh link tương ứng, làm tròn lên cm. Xem chi tiết + số liệu thô trong
-comment ngay trên `SPHERE_RADII` (`robot_geometry.py`) và
-`docs/PARAMETERS_REFERENCE.md` mục 8. Vẫn còn thô ở khía cạnh khác: 1
-sphere/link không phủ hết chiều dài link, và link 1/2/4/6 không có
-sphere riêng -- coverage hình học vẫn đơn giản hơn ARMTD thật, chỉ có
-bán kính là đã chính xác vật lý.
+comment ngay trên `LINK_RADIUS` (`robot_geometry.py`) và
+`docs/PARAMETERS_REFERENCE.md` mục 8. Coverage hình học đã khá hơn: mỗi
+link có capsule riêng phủ hết chiều dài (không chỉ elbow/forearm/wrist/
+gripper như 4-sphere cũ) -- vẫn đơn giản hơn ARMTD thật ở chỗ reachtube
+(`propagate_arm_tube`) trước đây chỉ inflate từng điểm-frame riêng lẻ,
+không model đúng capsule giữa 2 frame; đã fix 2026-09-05 (link-box
+bounding cả 2 đầu, xem `shortstop/arm_reach.py`'s module docstring).
 
 ## 5. Vì sao gộp CE-search + Repair thành 1 hàng ablation
 
@@ -145,6 +155,11 @@ trong, chỉ không phải 1 hàng so sánh riêng).
   pseudo-inverse để suy joint delta từ task-space action — chỉ đúng tại 1
   điểm tuyến tính hóa, giống hệt cảnh báo `MPCFilterShield` đã ghi cho 2D.
   Chỉ mô hình vị trí (position), bỏ qua rotation/gripper hoàn toàn.
+  **Cập nhật 2026-09-05**: không chứng minh hình thức được, nhưng giờ có
+  thể *calibrate* thay vì đoán — `scripts/calibrate_arm_model_error.py`
+  đo residual thật (`step_prediction_residual`) trên rollout thật, chưa
+  chạy (cần WSL2). `model_error` vẫn hardcode 0.02 cho tới khi có số liệu
+  đó.
 
 ## 7. Stress-test có ý nghĩa thật không? (đã research, câu trả lời: có)
 

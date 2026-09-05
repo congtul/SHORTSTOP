@@ -1,35 +1,70 @@
 import numpy as np
 
-from shortstop.arm_reach import arm_find_counterexample, arm_robustness_to_go, propagate_arm_tube
+from shortstop.arm_reach import (
+    _step_joint_config,
+    arm_find_counterexample,
+    arm_robustness_to_go,
+    arm_step_robustness,
+    propagate_arm_tube,
+    step_prediction_residual,
+)
 from shortstop.env import Obstacle
-from shortstop.robot_geometry import FLANGE_FRAME_INDEX, FRAME_RADIUS, N_JOINTS
+from shortstop.robot_geometry import (
+    FLANGE_FRAME_INDEX, FRAME_RADIUS, LINK_RADIUS, N_JOINTS, panda_frames,
+)
 
 
 def _zero_chunk(horizon=4, action_dim=7):
     return np.zeros((horizon, action_dim))
 
 
+def test_step_prediction_residual_is_zero_when_the_real_next_config_matches_the_prediction():
+    q = np.random.default_rng(6).uniform(-0.3, 0.3, size=N_JOINTS)
+    action = np.array([0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    predicted_q = _step_joint_config(q, action[:3])
+    assert np.isclose(step_prediction_residual(q, action, predicted_q), 0.0, atol=1e-9)
+
+
+def test_step_prediction_residual_is_positive_when_the_real_next_config_is_perturbed():
+    q = np.random.default_rng(6).uniform(-0.3, 0.3, size=N_JOINTS)
+    action = np.array([0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    predicted_q = _step_joint_config(q, action[:3])
+    perturbed_q = predicted_q.copy()
+    perturbed_q[2] += 0.05
+    assert step_prediction_residual(q, action, perturbed_q) > 0.0
+
+
 def test_propagate_arm_tube_zero_action_keeps_frames_at_current_position():
     q = np.random.default_rng(0).uniform(-0.3, 0.3, size=N_JOINTS)
     tube = propagate_arm_tube(q, _zero_chunk(), w_bar=0.0, model_error=0.0)
+    frames = panda_frames(q)
 
     assert len(tube) == 5  # horizon 4 + the initial (realized) entry
     for step in tube[1:]:
-        assert set(step.keys()) == set(range(9))  # the whole chain, not a coarser subset
-        for i, box in step.items():
-            # zero disturbance/model_error -> the box's *center* doesn't
-            # move, but it's still inflated by the frame's own physical
-            # radius (see propagate_arm_tube's docstring), so it's not
-            # zero-width.
-            assert np.allclose(box.high - box.low, 2 * FRAME_RADIUS[i], atol=1e-9)
+        # the whole chain (9 frame capsules + 8 link capsules), not a coarser subset
+        assert set(step.keys()) == set(range(9)) | {("link", i) for i in range(8)}
+        for i in range(9):
+            capsule = step[i]
+            # zero disturbance/model_error -> the capsule's own point
+            # doesn't move, but its radius is still the frame's own
+            # physical radius (see propagate_arm_tube's docstring), not 0.
+            assert np.allclose(capsule.a, capsule.b)  # a point capsule
+            assert np.isclose(capsule.radius, FRAME_RADIUS[i], atol=1e-9)
+        for i in range(8):
+            capsule = step[("link", i)]
+            # link capsule spans exactly the two endpoint frames, radius
+            # exactly LINK_RADIUS[i] (zero disturbance/model_error here)
+            assert np.allclose(capsule.a, frames[i], atol=1e-9)
+            assert np.allclose(capsule.b, frames[i + 1], atol=1e-9)
+            assert np.isclose(capsule.radius, LINK_RADIUS[i], atol=1e-9)
 
 
 def test_propagate_arm_tube_inflates_with_disturbance_and_model_error():
     q = np.zeros(N_JOINTS)
     tube = propagate_arm_tube(q, _zero_chunk(horizon=1), w_bar=0.05, model_error=0.02)
-    box = tube[1][0]
+    capsule = tube[1][0]
     expected_r = 0.05 + 0.02 + FRAME_RADIUS[0]  # disturbance + model_error + own radius
-    assert np.allclose(box.high - box.low, 2 * expected_r, atol=1e-9)  # inflate(r) widens by r each side
+    assert np.isclose(capsule.radius, expected_r, atol=1e-9)
 
 
 def test_arm_robustness_to_go_matches_manual_min_over_frames_and_obstacles():
@@ -42,7 +77,49 @@ def test_arm_robustness_to_go_matches_manual_min_over_frames_and_obstacles():
     obstacles = [Obstacle(center=flange_pos, radius=0.05)]
 
     value = arm_robustness_to_go(tube, obstacles)
-    assert np.isclose(value, -0.05, atol=1e-6)  # inside by exactly the radius
+    # exact capsule-vs-sphere distance: both surfaces (flange's own
+    # physical radius AND the obstacle's) are subtracted, not just the
+    # obstacle's -- the old Box-based formula under-counted this (see
+    # arm_reach.py's module docstring on the Box -> Capsule fix).
+    assert np.isclose(value, -(FRAME_RADIUS[FLANGE_FRAME_INDEX] + 0.05), atol=1e-6)
+
+
+def test_link_box_catches_a_mid_link_collision_the_old_frame_only_check_would_miss():
+    """Regression test for the capsule-vs-capsule fix: an obstacle placed
+    exactly at the MIDPOINT of a link (far from both its endpoint frames)
+    used to be invisible to propagate_arm_tube (only 9 per-frame point-
+    boxes, no segment/link modeling) even though the arm's own volume
+    genuinely passes through it -- shortstop.calvin_experiment._clearance
+    (ground truth, uses the real capsule chain) would have caught this.
+    An unfolded (non-home) config is used deliberately: at q=0 the arm
+    folds back on itself, so unrelated frames' own heavily-inflated boxes
+    (e.g. the flange's, FRAME_RADIUS=0.16) can coincidentally overlap a
+    point that's nowhere near them in the kinematic chain -- a config
+    where every frame's own distance is unambiguously positive isolates
+    the fix being tested here."""
+    q = np.array([0.0, 0.5, 0.0, -1.0, 0.0, 1.0, 0.0])
+    chunk = _zero_chunk(horizon=1)
+    tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
+    frames = panda_frames(q)
+
+    link_i = 4
+    midpoint = (frames[link_i] + frames[link_i + 1]) / 2.0
+    obstacles = [Obstacle(center=midpoint, radius=0.01)]
+
+    # old behavior, reconstructed directly: every one of the 9 frame-only
+    # boxes stays clear (positive robustness) -- the old model would have
+    # called this candidate admissible.
+    frame_only_step = {k: v for k, v in tube[1].items() if isinstance(k, int)}
+    old_robustness = arm_step_robustness(frame_only_step, obstacles)
+    assert old_robustness > 0.0
+
+    # new behavior: arm_robustness_to_go (frames + links) correctly flags
+    # the violation, via link 4's own box.
+    new_robustness = arm_robustness_to_go(tube, obstacles)
+    assert new_robustness < 0.0
+
+    ce = arm_find_counterexample(tube, obstacles)
+    assert ce["frame"] == ("link", link_i)
 
 
 def test_arm_find_counterexample_identifies_the_violating_step_and_robustness():
@@ -64,13 +141,9 @@ def test_arm_find_counterexample_identifies_the_violating_step_and_robustness():
 
     ce = arm_find_counterexample(tube, obstacles)
     assert ce["step"] == 2
-    assert np.isclose(ce["robustness"], -0.05, atol=1e-6)
-    # NOT asserting ce["frame"] == FLANGE_FRAME_INDEX: frame 7 (wrist) sits
-    # only ~0.107m from frame 8 (flange, see FLANGE_OFFSET) -- closer than
-    # the sum of their own FRAME_RADIUS inflation (0.11 + 0.16) -- so their
-    # inflated boxes overlap here and either can legitimately be reported
-    # as the (tied) worst violator. Same box-degeneracy caveat this
-    # module's docstring already documents for *steps*, now also possible
-    # *between adjacent frames* now that the chain checks all 9 of them
-    # instead of 4 sparse, widely-separated points.
-    assert ce["frame"] in (7, FLANGE_FRAME_INDEX)
+    # exact capsule-vs-sphere distance -- frame 8 (flange, exactly at the
+    # obstacle) is unambiguously the worst violator now (no more box-
+    # degeneracy tie with frame 7, since there's no box approximation
+    # left to create one -- see arm_reach.py's Box -> Capsule fix).
+    assert ce["frame"] == FLANGE_FRAME_INDEX
+    assert np.isclose(ce["robustness"], -(FRAME_RADIUS[FLANGE_FRAME_INDEX] + 0.05), atol=1e-6)

@@ -13,10 +13,16 @@ from shortstop.env import Obstacle
 from shortstop.mdt_policy_client import MockMDTPolicyClient
 from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS
 
+# A real, well-within-JOINT_LIMITS Franka "ready" pose -- NOT np.zeros: see
+# tests/test_arm_shield.py's own Q_HOME for why q=0 is itself physically
+# invalid for joint 4 alone, which matters now that select() enforces
+# JOINT_LIMITS.
+Q_HOME = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
+
 
 def test_full_propose_reach_certify_repair_loop_on_synthetic_candidates():
     rng = np.random.default_rng(0)
-    q = np.zeros(N_JOINTS)
+    q = Q_HOME
     policy = MockMDTPolicyClient(horizon=10, action_dim=7, n_candidates=6, noise_std=0.05, rng=rng)
 
     candidates = policy.propose(observation={})  # Propose
@@ -46,7 +52,7 @@ def test_full_propose_select_loop_with_conf_thresh_shield_on_synthetic_candidate
     all, disagreement-filter -> Select instead of tube-vs-obstacle
     Certify -> Repair (see shortstop.arm_shield.ArmConfThreshShield)."""
     rng = np.random.default_rng(0)
-    q = np.zeros(N_JOINTS)
+    q = Q_HOME
     policy = MockMDTPolicyClient(horizon=10, action_dim=7, n_candidates=8, noise_std=0.05, rng=rng)
 
     candidates = policy.propose(observation={})  # Propose
@@ -68,7 +74,7 @@ def test_full_propose_select_loop_with_stl_monitor_shield_on_synthetic_candidate
     disagreement filter or ShortStop's certified tube+repair (see
     shortstop.arm_shield.ArmSTLMonitorShield)."""
     rng = np.random.default_rng(0)
-    q = np.zeros(N_JOINTS)
+    q = Q_HOME
     policy = MockMDTPolicyClient(horizon=10, action_dim=7, n_candidates=8, noise_std=0.05, rng=rng)
 
     candidates = policy.propose(observation={})  # Propose

@@ -70,7 +70,7 @@ prototype's own -goal_distance already accepts (Cartesian proximity, not
 import numpy as np
 
 from .arm_reach import propagate_arm_tube
-from .robot_geometry import FLANGE_FRAME_INDEX
+from .robot_geometry import FLANGE_FRAME_INDEX, to_local_frame
 
 
 def _target_object_position(task_oracle, subtask, current_info):
@@ -92,7 +92,10 @@ def _target_object_position(task_oracle, subtask, current_info):
     return None  # doors/lights/buttons/surfaces: no Cartesian position exposed (see module docstring)
 
 
-def calvin_progress_scores(task_oracle, subtask, current_info, joint_angles, candidates, replan_steps):
+def calvin_progress_scores(
+    task_oracle, subtask, current_info, joint_angles, candidates, replan_steps,
+    base_position=(0.0, 0.0, 0.0), base_orientation=(0.0, 0.0, 0.0, 1.0),
+):
     """g(a) for each of `candidates` (raw chunks from policy.propose()),
     same order/length as `candidates` -- see module docstring. All 0.0
     (neutral, no ranking signal) when `subtask`'s target object has no
@@ -104,10 +107,27 @@ def calvin_progress_scores(task_oracle, subtask, current_info, joint_angles, can
     full length. Each chunk is truncated to its first `replan_steps` rows
     before propagation; `replan_steps` >= a chunk's own length is fine
     (propagate_arm_tube then just sees the whole chunk).
+
+    `base_position`/`base_orientation`: the robot's real base pose in
+    CALVIN's world frame (env.env.robot.base_position/base_orientation
+    for a real env) -- default identity for callers/tests that don't care
+    about the offset (same convention shortstop.calvin_obstacle_viz's
+    to_world_frame already established). REQUIRED to be non-identity for
+    a real run: `predicted_flange` below comes from propagate_arm_tube,
+    which works in the robot's own *local* base frame (see robot_geometry.
+    py's module docstring), but `target` (a real scene object's position)
+    is reported by CALVIN in true WORLD coordinates -- CALVIN's real
+    scenes do NOT have the robot base at the world origin (e.g.
+    calvin_scene_D.yaml's robot_base_position = [-0.34, -0.46, 0.24]).
+    Fixed 2026-09-05: previously these two frames were subtracted
+    directly with no correction, biasing g(a) by the base offset (~0.6m,
+    large relative to one replan window's own reach) for every real
+    scene -- see docs/PARAMETERS_REFERENCE.md.
     """
-    target = _target_object_position(task_oracle, subtask, current_info)
-    if target is None:
+    target_world = _target_object_position(task_oracle, subtask, current_info)
+    if target_world is None:
         return [0.0] * len(candidates)
+    target = to_local_frame(target_world, base_position, base_orientation)
 
     scores = []
     for chunk in candidates:

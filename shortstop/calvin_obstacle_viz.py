@@ -30,6 +30,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .camera_projection import project_point, project_radius
+from .robot_geometry import to_world_frame as _to_world_frame
 
 
 def _import_image_sequence_clip():
@@ -46,35 +47,6 @@ def _import_image_sequence_clip():
     except ImportError:
         from moviepy import ImageSequenceClip
     return ImageSequenceClip
-
-
-def _quaternion_to_rotation_matrix(quaternion):
-    """pybullet's xyzw quaternion convention -> 3x3 rotation matrix, pure
-    numpy (no pybullet import needed -- just the 4 components as plain
-    floats, e.g. straight from robot.base_orientation)."""
-    x, y, z, w = quaternion
-    return np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-    ])
-
-
-def _to_world_frame(local_point, base_position, base_orientation):
-    """calvin_obstacle.sample_obstacle_from_reference_chunk's obstacle.
-    center is deliberately expressed in the robot's own *local* base
-    frame (see that module's docstring: the safety math never needs the
-    base-to-world transform, since both the obstacle and the real
-    per-step joint angles live in that same local frame). But CALVIN's
-    robot base does NOT sit at the world origin (e.g.
-    calvin_env/conf/scene/calvin_scene_D.yaml's robot_base_position =
-    [-0.34, -0.46, 0.24]), and the camera's viewMatrix is built in true
-    world coordinates -- so only this visualization needs to leave the
-    local frame, via the same base_position/base_orientation
-    (robot.base_position/robot.base_orientation, the latter already a
-    quaternion) PyBullet placed the robot's URDF at."""
-    rotation = _quaternion_to_rotation_matrix(base_orientation)
-    return np.asarray(base_position) + rotation @ np.asarray(local_point)
 
 
 _OCCLUSION_EPSILON = 0.01  # meters -- avoids z-fighting flicker when the obstacle sits ~on a real surface

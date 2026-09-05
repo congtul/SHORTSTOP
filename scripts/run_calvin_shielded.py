@@ -124,6 +124,17 @@ RUN_DIAGNOSTIC = False
 # floor ~0.13), success=0.474 (closest to select-only/inf's 0.476),
 # activation=0.086 (still doing something, not a total no-op). Only read
 # in eval mode (no --tuning flag).
+#
+# CONFIRMED 2026-09-05 on the held-out eval cohort (idx 100-199, same
+# REPLAN_STEPS=10/radius=0.08/threshold=0.9): violation_rate=0.140,
+# success_rate=0.466, shield_activation_rate=0.074, avg_seq_len=2.33/5
+# (n=307 attempted subtasks; clearance mean=0.204 median=0.184 p10=-0.057
+# p90=0.515 min=-0.204 max=0.638) -- nearly identical to the tuning-cohort
+# numbers above (violation 0.134->0.140, success 0.474->0.466), same
+# minor-bias pattern already seen for the unshielded baseline (see
+# docs/PARAMETERS_REFERENCE.md). THESE eval-cohort numbers are the ones
+# to cite as Conf-Thresh's final reported result, not the tuning-cohort
+# ones above.
 CHOSEN_THRESHOLD = 0.9
 
 RUN_OUTPUT_DIR = REPO_ROOT / "outputs" / "calvin_shielded_runs" / (
@@ -185,6 +196,33 @@ def _shield_activation_rate(sequence_results):
     if n_decisions == 0:
         return None
     return n_activated / n_decisions
+
+
+def _latency_stats(sequence_results):
+    """mean/median/p95 latency_ms over every decision across every
+    attempted subtask -- mirrors shortstop.metrics.aggregate's own
+    latency_ms_mean/median/p95, computed here at CALVIN granularity from
+    run_calvin_shielded_subtask's new latencies_ms field."""
+    all_latencies = [t for attempts in sequence_results for a in attempts for t in a["latencies_ms"]]
+    if not all_latencies:
+        return None
+    values = np.asarray(all_latencies)
+    return {
+        "n": len(values), "mean": float(values.mean()), "median": float(np.median(values)),
+        "p95": float(np.percentile(values, 95)),
+    }
+
+
+def _intervention_precision(sequence_results):
+    """sum(rejected_truly_unsafe)/sum(rejected_total) pooled across every
+    decision -- the paper's own intervention_precision metric (Table II),
+    not previously computed for any CALVIN baseline. None if nothing was
+    ever rejected (nothing to compute a precision over)."""
+    total_rejected = sum(a["rejected_total"] for attempts in sequence_results for a in attempts)
+    total_truly_unsafe = sum(a["rejected_truly_unsafe"] for attempts in sequence_results for a in attempts)
+    if total_rejected == 0:
+        return None
+    return total_truly_unsafe / total_rejected
 
 
 def _disagreement_percentiles(disagreement_samples):
@@ -305,11 +343,21 @@ def _run_one_threshold(
     slots = build_fixed_cohort_slots(sequence_results, subtasks_per_sequence=5)
     violation_rate, success_rate = fixed_cohort_rates(slots)
     activation_rate = _shield_activation_rate(sequence_results)
+    latency_stats = _latency_stats(sequence_results)
+    intervention_precision = _intervention_precision(sequence_results)
     _log(
         f"[{label}] violation_rate={violation_rate:.3f}  success_rate={success_rate:.3f}  "
         f"shield_activation_rate={activation_rate:.3f}  (avg_seq_len={success_rate * 5:.2f}/5, "
         f"n_sequences={cfg.num_sequences})"
     )
+    precision_str = "n/a" if intervention_precision is None else f"{intervention_precision:.3f}"
+    if latency_stats is not None:
+        _log(
+            f"  latency_ms_mean={latency_stats['mean']:.3f}  latency_ms_median={latency_stats['median']:.3f}  "
+            f"latency_ms_p95={latency_stats['p95']:.3f}  intervention_precision={precision_str}"
+        )
+    else:
+        _log("  (no decisions recorded any latency)")
 
     entry = {
         "label": label,
@@ -319,9 +367,18 @@ def _run_one_threshold(
         "shield_activation_rate": activation_rate,
         "avg_seq_len": success_rate * 5,
         "n_sequences": cfg.num_sequences,
+        "latency_ms": latency_stats,
+        "intervention_precision": intervention_precision,
         "clearance_stats": None,
         "video_paths": None,
         "video_skip_reason": None,
+        # Full per-sequence, per-subtask-attempt records -- not just the
+        # aggregates above -- so conservatism_cost/recovery_rate (and
+        # anything else) can be recomputed later without a re-run (see
+        # docs/PARAMETERS_REFERENCE.md's metrics-gap note: the earlier lack
+        # of this is exactly why those 2 metrics couldn't be backfilled
+        # for Conf-Thresh's already-finalized eval run).
+        "sequence_results": sequence_results,
     }
 
     if cfg.debug:

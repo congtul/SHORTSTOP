@@ -37,36 +37,79 @@ that entered X_u is ever counted as a success by continuing past it.
 
 Ground-truth collision check (_clearance) uses the *full-arm capsule
 chain* (robot_geometry.capsule_segments -- one capsule per link, link0
-through link7) plus a gripper-tip capsule (flange to
-robot_geometry.gripper_tip_position(), covering panda_hand + the fingers
-past the flange). A collision partway along a link (elbow/forearm/wrist
-links are 0.14-0.35m long, far longer than a single point's own radius),
-on a link with no dedicated check point at all, or at the fingertips
-(which point *ahead* of the flange in the direction of travel, past
-where a flange-centered point alone would ever detect anything) is
-covered. shortstop.arm_reach's reachtube (used by the shield's own
-Certify step, once wired in) was upgraded in step to check the same
-9-frame chain (robot_geometry.FRAME_RADIUS/panda_frames(), not a coarser
-named subset of it) -- see its module docstring for the residual
-per-point-box (vs. exact capsule) approximation that remains there.
+through link7) plus TWO real finger capsules
+(robot_geometry.finger_tip_capsules(), tracking the REAL current
+gripper_opening_width -- not gripper_tip_position()'s older single
+fixed-radius worst-case-open assumption, see finger_tip_capsules's own
+docstring for the 2026-09-05 fix). A collision partway along a link
+(elbow/forearm/wrist links are 0.14-0.35m long, far longer than a single
+point's own radius), on a link with no dedicated check point at all, or
+at the fingertips (which point *ahead* of the flange in the direction of
+travel, past where a flange-centered point alone would ever detect
+anything) is covered. shortstop.arm_reach's reachtube (used by the
+shield's own Certify step) checks the same 9-frame + 8-link chain via
+exact Capsule geometry (robot_geometry.FRAME_RADIUS/LINK_RADIUS/
+panda_frames(), not a coarser named subset of it) -- see its module
+docstring. The shield's own reachtube still folds the whole flange->
+fingertip reach into ONE conservative sphere (FRAME_RADIUS[8], via
+gripper_tip_position()/GRIPPER_TIP_RADIUS) rather than two real fingers,
+unlike ground truth above -- it has no orientation tracking through a
+*predicted* Jacobian-stepped trajectory the way ground truth can from the
+real, already-known current state, and threading a real-time
+gripper_width through the shield's own Certify call chain (`_admissible`/
+`select()`/the CALVIN harness) is deliberately out of scope for now (a
+real, still-open, but conservative-direction-only gap, same category as
+the Jacobian-linearization approximation this module's neighbors already
+document).
 """
+import time
+
 import numpy as np
 
+from .arm_reach import nominal_joint_trajectory
 from .calvin_progress import calvin_progress_scores
 from .robot_geometry import (
-    GRIPPER_TIP_RADIUS,
+    FINGER_RADIUS,
     capsule_segments,
-    gripper_tip_position,
+    finger_tip_capsules,
     panda_frames,
     point_to_segment_distance,
 )
 
 ROBOT_OBS_RAW_JOINT_SLICE = slice(7, 14)
+ROBOT_OBS_RAW_GRIPPER_WIDTH_INDEX = 6
 ROBOT_OBS_RAW_GRIPPER_INDEX = 14
 
 
 def _joint_angles_from_obs(obs):
     return obs["robot_obs_raw"].detach().cpu().numpy()[ROBOT_OBS_RAW_JOINT_SLICE]
+
+
+def _base_transform_from_env(env):
+    """The real (base_position, base_orientation) PyBullet placed this
+    env's robot URDF at (env.env.robot.base_position/base_orientation --
+    a real CALVIN env is a HulcWrapper, `env.env` the raw
+    PlayTableSimEnv), or the identity transform if `env` doesn't expose
+    that path at all (e.g. the FakeEnv test doubles throughout
+    tests/test_calvin_experiment.py, which have no `.env.robot` chain --
+    same "identity default for callers/tests that don't care" convention
+    shortstop.calvin_obstacle_viz.save_sequence_video's own
+    base_position/base_orientation params already use). Needed because
+    shortstop.calvin_progress.calvin_progress_scores's g(a) has to compare
+    a robot-base-local predicted position against a real WORLD-frame
+    scene-object position -- see that function's own docstring."""
+    robot = getattr(getattr(env, "env", None), "robot", None)
+    if robot is None:
+        return (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)
+    return robot.base_position, robot.base_orientation
+
+
+def _gripper_width_from_obs(obs):
+    """CALVIN's own `gripper_opening_width` (calvin_env.robot.Robot.
+    get_observation) -- the REAL current finger separation, sum of both
+    prismatic finger-joint values -- see robot_geometry.finger_tip_
+    capsules's docstring for how this feeds into ground-truth clearance."""
+    return float(obs["robot_obs_raw"].detach().cpu().numpy()[ROBOT_OBS_RAW_GRIPPER_WIDTH_INDEX])
 
 
 def _gripper_action_from_obs(obs):
@@ -79,7 +122,7 @@ def _to_action_tensor(action_row):
 
 
 def _clearance(obs, obstacle):
-    """min over (the flange->fingertip capsule, every one of the 8 link
+    """min over (both real finger capsules, every one of the 8 link
     capsules) of (distance to obstacle center - obstacle.radius - this
     primitive's own radius) -- signed: <= 0 means violated (the arm's
     *volume*, not just a handful of sample points, touches the
@@ -93,20 +136,55 @@ def _clearance(obs, obstacle):
     omitting either the arm's thickness, the *length* of a link between
     its two named endpoints, or the fingers reaching out past the flange
     would under-count real risk.
+
+    Uses robot_geometry.finger_tip_capsules with the REAL current
+    gripper_opening_width (not a fixed worst-case-open assumption) -- see
+    that function's docstring.
     """
     if obstacle is None:
         return None
     joint_angles = _joint_angles_from_obs(obs)
+    gripper_width = _gripper_width_from_obs(obs)
 
-    flange = panda_frames(joint_angles)[-1]
-    tip = gripper_tip_position(joint_angles)
-    d = point_to_segment_distance(obstacle.center, flange, tip)
-    clearances = [d - obstacle.radius - GRIPPER_TIP_RADIUS]
+    clearances = []
+    for near, far in finger_tip_capsules(joint_angles, gripper_width):
+        d = point_to_segment_distance(obstacle.center, near, far)
+        clearances.append(d - obstacle.radius - FINGER_RADIUS)
 
     for point_a, point_b, link_radius in capsule_segments(joint_angles):
         d = point_to_segment_distance(obstacle.center, point_a, point_b)
         clearances.append(d - obstacle.radius - link_radius)
 
+    return float(min(clearances))
+
+
+def _candidate_clearance(joint_angles, chunk, obstacle, gripper_width):
+    """Ground-truth clearance (same capsule-chain formula as _clearance)
+    of a CANDIDATE chunk's own nominal rollout -- not the real executed
+    trajectory. min over every predicted step's full capsule chain, using
+    the nominal joint trajectory arm_reach.nominal_joint_trajectory
+    predicts (the same Jacobian-pseudo-inverse stepping the shield's own
+    Certify step uses). Used for intervention_precision: was a REJECTED
+    candidate actually unsafe per ground truth, or a false-positive
+    rejection? No extra env interaction needed -- purely offline geometry
+    on the candidate's own chunk, computed once per rejected candidate per
+    decision. `None` if there is no obstacle at all.
+
+    `gripper_width`: the REAL current gripper_opening_width, frozen for
+    the whole predicted horizon (this candidate's own chunk doesn't let
+    us predict how the gripper's width itself changes mid-chunk -- same
+    kind of frozen-at-decision-time approximation the shield's own
+    reachtube already makes for other quantities, not a new one)."""
+    if obstacle is None:
+        return None
+    clearances = []
+    for q in nominal_joint_trajectory(joint_angles, chunk)[1:]:
+        for near, far in finger_tip_capsules(q, gripper_width):
+            d = point_to_segment_distance(obstacle.center, near, far)
+            clearances.append(d - obstacle.radius - FINGER_RADIUS)
+        for point_a, point_b, link_radius in capsule_segments(q):
+            d2 = point_to_segment_distance(obstacle.center, point_a, point_b)
+            clearances.append(d2 - obstacle.radius - link_radius)
     return float(min(clearances))
 
 
@@ -145,7 +223,20 @@ def run_calvin_unshielded_subtask(
     branch (no shield = execute the first candidate).
 
     Returns {'violated': bool, 'reached': bool, 'min_clearance': float or
-    None}, plus (only when `record_trajectory=True`) 'trajectory' (list of
+    None, 'steps_taken': int -- real env-steps elapsed since THIS
+    subtask's own start (reset to 0 at the top of this function, not
+    carried over from a previous subtask in the same sequence) before
+    violating/reaching/running out of ep_len. Answers "did the arm get a
+    real chance to move before this obstacle was hit" directly: if
+    `violated` and `steps_taken` is small, the obstacle's own capture
+    radius (obstacle.radius + whichever capsule primitive is closest --
+    see robot_geometry.LINK_RADIUS/FINGER_RADIUS) is large relative to
+    how far this chunk's own motion covers per replan window, so much of
+    the chunk's early trajectory can already register as "close enough" --
+    a real property of the radius/motion-scale ratio, not a
+    obstacle-placement bug (the obstacle is always sampled from THIS
+    subtask's own first real candidate/joint_angles, never stale -- see
+    `first_chunk` below)}, plus (only when `record_trajectory=True`) 'trajectory' (list of
     (9, 3) panda_frames() arrays -- the whole chain, base through flange,
     not a coarser named subset of it -- one per step incl. the starting
     pose), plus (when `record_trajectory=True` OR `record_camera_frames=True`)
@@ -238,7 +329,7 @@ def run_calvin_unshielded_subtask(
         if violated or reached:
             break
 
-    result = {"violated": violated, "reached": reached, "min_clearance": min_clearance}
+    result = {"violated": violated, "reached": reached, "min_clearance": min_clearance, "steps_taken": steps_taken}
     if record_trajectory:
         result["trajectory"] = trajectory
     if record_trajectory or record_camera_frames:
@@ -358,6 +449,21 @@ def run_calvin_shielded_subtask(
     *pooled* shield-activation-rate (sum(n_activated)/sum(n_decisions)
     across every attempted subtask, not a mean of per-subtask rates -- see
     docs/TUNING_WORKFLOW.md).
+
+    Also returns three metrics generic to every shield (not previously
+    computed for any CALVIN baseline -- see docs/PARAMETERS_REFERENCE.md's
+    metrics gap and shortstop.calvin_metrics.recovery_rate/
+    conservatism_cost for the other two of the paper's 7 headline
+    metrics this enables): 'latencies_ms' (one entry per decision, the
+    wall-clock cost of that `shield.select()` call -- mirrors
+    shortstop.experiment.run_episode's own latency instrumentation),
+    'rejected_total' and 'rejected_truly_unsafe' (pooled across every
+    decision: for each candidate NOT in `admissible_mask`, whether its OWN
+    nominal rollout -- see _candidate_clearance -- actually crosses the
+    real, privileged obstacle; feed `rejected_truly_unsafe /
+    rejected_total` for intervention_precision). No extra env interaction
+    needed for the last two -- purely offline geometry on each rejected
+    candidate's own chunk.
     """
     obs = env.get_obs()
     goal = _lang_goal(lang_embeddings, val_annotations, subtask)
@@ -370,6 +476,9 @@ def run_calvin_shielded_subtask(
     steps_taken = 0
     n_decisions = 0
     n_activated = 0
+    latencies_ms = []
+    rejected_total = 0
+    rejected_truly_unsafe = 0
     first_chunk = True
     trajectory = [panda_frames(_joint_angles_from_obs(obs))] if record_trajectory else None
     if record_camera_frames:
@@ -395,11 +504,24 @@ def run_calvin_shielded_subtask(
         if hasattr(shield, "obstacles") and obstacle is not None:
             shield.obstacles = [obstacle]
 
-        scores = calvin_progress_scores(task_oracle, subtask, current_info, joint_angles, candidates, replan_steps)
+        base_position, base_orientation = _base_transform_from_env(env)
+        scores = calvin_progress_scores(
+            task_oracle, subtask, current_info, joint_angles, candidates, replan_steps,
+            base_position=base_position, base_orientation=base_orientation,
+        )
+        t0 = time.perf_counter()
         chunk, shield_info = shield.select(joint_angles, candidates, scores)
+        latencies_ms.append((time.perf_counter() - t0) * 1000.0)
         n_decisions += 1
         if not all(shield_info["admissible_mask"]):
             n_activated += 1
+            for candidate, ok in zip(candidates, shield_info["admissible_mask"]):
+                if ok:
+                    continue
+                rejected_total += 1
+                clearance = _candidate_clearance(joint_angles, candidate, obstacle, _gripper_width_from_obs(obs))
+                if clearance is not None and clearance <= 0:
+                    rejected_truly_unsafe += 1
         if shield_info["fallback"]:
             chunk[:, 6] = _gripper_action_from_obs(obs)
 
@@ -453,6 +575,8 @@ def run_calvin_shielded_subtask(
     result = {
         "violated": violated, "reached": reached, "min_clearance": min_clearance,
         "n_decisions": n_decisions, "n_activated": n_activated,
+        "latencies_ms": latencies_ms, "rejected_total": rejected_total,
+        "rejected_truly_unsafe": rejected_truly_unsafe, "steps_taken": steps_taken,
     }
     if record_trajectory:
         result["trajectory"] = trajectory

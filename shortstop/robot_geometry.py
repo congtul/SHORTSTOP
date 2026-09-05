@@ -52,6 +52,26 @@ N_JOINTS = 7
 # gripper end up" check).
 FLANGE_FRAME_INDEX = N_JOINTS + 1
 
+# Per-joint (lower, upper) position limits, radians -- the *soft* limits
+# calvin_env's own Robot class actually uses at runtime
+# (mdt_policy/calvin_env/conf/robot/panda.yaml's lower_joint_limits/
+# upper_joint_limits, mirrored as constructor defaults in
+# mdt_policy/calvin_env/calvin_env/robot/robot.py), not panda.urdf's looser
+# hard <limit> tags -- these soft limits are what the real simulated
+# robot's safety controller respects during an actual CALVIN rollout, so
+# they're the operative bound a candidate/repaired chunk must respect too.
+# Copied in as a constant (not imported from mdt_policy) to keep this
+# module dependency-free, matching PANDA_DH/LINK_RADIUS's own style.
+JOINT_LIMITS = np.array([
+    (-2.8973, 2.8973),
+    (-1.7628, 1.7628),
+    (-2.8973, 2.8973),
+    (-3.0718, -0.0698),
+    (-2.8973, 2.8973),
+    (-0.0175, 3.7525),
+    (-2.8973, 2.8973),
+])
+
 # Per-link (link0..link7) capsule radius, measured from the real collision
 # meshes shipped with mdt_policy's calvin_env
 # (mdt_policy/calvin_env/data/franka_panda/meshes/collision/link{0..7}.obj),
@@ -111,7 +131,34 @@ GRIPPER_TIP_OFFSET = 0.1
 # (finger's own thickness, rounded up from 0.019) = 0.06, a deliberately
 # conservative fixed bound for "gripper anywhere from fully closed to
 # fully open", not a precise measurement the way LINK_RADIUS is.
+#
+# RESOLVED for ground truth (2026-09-05, see finger_tip_capsules() below):
+# calvin_experiment._clearance now tracks the REAL current gripper width
+# instead of always assuming worst-case-open -- this constant (and
+# gripper_tip_position()) stay as-is ONLY for arm_reach.propagate_arm_tube's
+# own reachtube (FRAME_RADIUS[8] below), which has no orientation tracking
+# and can't propagate 2 separate finger positions through a predicted
+# Jacobian-stepped trajectory the way ground truth can from the real,
+# already-known current state -- still a real, open approximation there
+# (see FRAME_RADIUS's own docstring), just no longer one ground truth
+# shares.
 GRIPPER_TIP_RADIUS = 0.06
+
+# Real per-finger geometry (panda.urdf, read directly -- not re-measured):
+# panda_hand_joint's origin is a pure yaw rotation (rpy 0,0,HAND_YAW_OFFSET)
+# from the flange, zero translation -- panda_hand's origin coincides
+# exactly with panda_frames()[-1] (the flange), just rotated. Both finger
+# joints (panda_finger_joint1/2) share origin (0,0,FINGER_JOINT_Z_OFFSET)
+# in the hand frame, moving along the hand's own +-Y axis by the real
+# prismatic joint value (0 = fully closed, at the centerline; 0.04 =
+# fully open, panda.urdf's own limit). FINGER_RADIUS is finger.obj's own
+# measured cross-section (0.019m, same SVD method as LINK_RADIUS),
+# rounded up to the nearest cm -- thickness only, NOT inflated for
+# worst-case spread the way GRIPPER_TIP_RADIUS is, since finger_tip_
+# capsules() below tracks the real spread explicitly instead of assuming it.
+HAND_YAW_OFFSET = -0.785398163397
+FINGER_JOINT_Z_OFFSET = 0.0584
+FINGER_RADIUS = 0.02
 
 # Conservative per-*frame* radius (index 0..8, matching panda_frames()),
 # used by arm_reach.propagate_arm_tube to inflate a reachtube box at
@@ -177,6 +224,15 @@ def panda_frames(joint_angles):
     return np.array([T[:3, 3] for T in _panda_transforms(joint_angles)])
 
 
+def within_joint_limits(joint_angles):
+    """True iff every joint angle is within JOINT_LIMITS's (lower, upper)
+    bound -- a candidate/repaired chunk whose nominal trajectory ever
+    exits this range isn't physically executable by the real robot's own
+    safety controller, regardless of how far it is from any obstacle."""
+    joint_angles = np.asarray(joint_angles, dtype=float)
+    return bool(np.all(joint_angles >= JOINT_LIMITS[:, 0]) and np.all(joint_angles <= JOINT_LIMITS[:, 1]))
+
+
 def gripper_tip_position(joint_angles):
     """Position of the gripper's TCP (tool-center-point, roughly at the
     fingertips) -- GRIPPER_TIP_OFFSET beyond the flange, along the
@@ -198,6 +254,48 @@ def gripper_tip_position(joint_angles):
     return flange_position + flange_rotation @ np.array([0.0, 0.0, GRIPPER_TIP_OFFSET])
 
 
+def finger_tip_capsules(joint_angles, gripper_width):
+    """Two finger capsules (left, right) tracking the REAL current
+    gripper opening -- replaces gripper_tip_position()'s single fixed-
+    radius (GRIPPER_TIP_RADIUS) capsule for ground-truth checking
+    (shortstop.calvin_experiment._clearance/_candidate_clearance), which
+    always assumed worst-case-open regardless of the gripper's actual
+    state.
+
+    `gripper_width`: CALVIN's own `gripper_opening_width` (calvin_env.
+    robot.Robot.get_observation -- sum of both prismatic finger-joint
+    values, each in the URDF's own [0, 0.04] range; 0 = fully closed).
+    Each finger's own offset from the centerline is `gripper_width / 2`
+    -- confirmed against calvin_env's own code, which halves this same
+    quantity for a different purpose (robot.py's IK gripper_state).
+
+    Geometry read directly from panda.urdf's real joint origins/axes
+    (HAND_YAW_OFFSET, FINGER_JOINT_Z_OFFSET, GRIPPER_TIP_OFFSET as the
+    finger's own approximate reach past the hand, same assumption
+    gripper_tip_position() already made) -- exact given panda_frames()'s
+    own accuracy, not a new approximation source.
+
+    Returns ((left_a, left_b), (right_a, right_b)) -- each finger's own
+    (near, far) endpoints in world coordinates, near = the prismatic
+    joint's own anchor point, far = approximately that finger's tip.
+    """
+    flange_T = _panda_transforms(joint_angles)[-1]
+    flange_position = flange_T[:3, 3]
+    flange_rotation = flange_T[:3, :3]
+
+    ca, sa = np.cos(HAND_YAW_OFFSET), np.sin(HAND_YAW_OFFSET)
+    hand_yaw = np.array([[ca, -sa, 0.0], [sa, ca, 0.0], [0.0, 0.0, 1.0]])
+    hand_rotation = flange_rotation @ hand_yaw
+
+    half_width = gripper_width / 2.0
+    capsules = []
+    for side in (1.0, -1.0):
+        near = flange_position + hand_rotation @ np.array([0.0, side * half_width, FINGER_JOINT_Z_OFFSET])
+        far = flange_position + hand_rotation @ np.array([0.0, side * half_width, GRIPPER_TIP_OFFSET])
+        capsules.append((near, far))
+    return capsules[0], capsules[1]
+
+
 def capsule_segments(joint_angles):
     """8 capsules covering the *entire* arm (link0..link7), each as
     (point_a, point_b, radius): point_a/point_b are consecutive
@@ -210,6 +308,24 @@ def capsule_segments(joint_angles):
     return [(frames[i], frames[i + 1], LINK_RADIUS[i]) for i in range(len(LINK_RADIUS))]
 
 
+def closest_point_on_segment(point, a, b):
+    """The point on line segment a-b closest to `point` -- project onto
+    the segment, clamp to its ends. Degenerate zero-length segment (a==b)
+    falls back to `a` itself (point-to-point). Shared by
+    point_to_segment_distance below and by shortstop.arm_reach's Capsule
+    primitive (arm_find_counterexample's witness point is exactly this
+    closest point)."""
+    point = np.asarray(point, dtype=float)
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    ab = b - a
+    length_sq = float(ab @ ab)
+    if length_sq < 1e-12:
+        return a.copy()
+    t = np.clip(float((point - a) @ ab) / length_sq, 0.0, 1.0)
+    return a + t * ab
+
+
 def point_to_segment_distance(point, a, b):
     """Closest distance from `point` to the line segment a-b -- the
     standard closed-form point-to-capsule-axis primitive (project onto
@@ -220,14 +336,7 @@ def point_to_segment_distance(point, a, b):
     this function returns the raw center-line distance, not a clearance.
     """
     point = np.asarray(point, dtype=float)
-    a = np.asarray(a, dtype=float)
-    b = np.asarray(b, dtype=float)
-    ab = b - a
-    length_sq = float(ab @ ab)
-    if length_sq < 1e-12:  # degenerate zero-length segment -> point-to-point
-        return float(np.linalg.norm(point - a))
-    t = np.clip(float((point - a) @ ab) / length_sq, 0.0, 1.0)
-    closest = a + t * ab
+    closest = closest_point_on_segment(point, a, b)
     return float(np.linalg.norm(point - closest))
 
 
@@ -252,3 +361,41 @@ def numerical_jacobian(joint_angles, frame_index, eps=1e-6):
 def end_effector_jacobian(joint_angles):
     """d(flange position)/d(joint_angles), a (3, 7) matrix."""
     return numerical_jacobian(joint_angles, frame_index=len(PANDA_DH) + 1)
+
+
+def quaternion_to_rotation_matrix(quaternion):
+    """pybullet's xyzw quaternion convention -> 3x3 rotation matrix, pure
+    numpy (no pybullet import needed -- just the 4 components as plain
+    floats, e.g. straight from robot.base_orientation)."""
+    x, y, z, w = quaternion
+    return np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ])
+
+
+def to_world_frame(local_point, base_position, base_orientation):
+    """Every function above (panda_frames, capsule_segments,
+    finger_tip_capsules, ...) works in the robot's own *local* base frame
+    (the DH chain starts at identity, `_panda_transforms`'s `T = np.eye(4)`
+    -- no base offset folded in). But CALVIN's robot base does NOT sit at
+    the world origin in the real scene configs (e.g. calvin_env/conf/
+    scene/calvin_scene_D.yaml's robot_base_position = [-0.34, -0.46,
+    0.24]) -- anything that needs to compare a local-frame point against
+    a genuinely world-frame quantity (a scene object's real position, a
+    camera's viewMatrix) must go through this transform first, via the
+    real base_position/base_orientation PyBullet placed the robot's URDF
+    at (env.env.robot.base_position/base_orientation for a real CALVIN
+    env -- base_orientation already a quaternion)."""
+    rotation = quaternion_to_rotation_matrix(base_orientation)
+    return np.asarray(base_position) + rotation @ np.asarray(local_point)
+
+
+def to_local_frame(world_point, base_position, base_orientation):
+    """Inverse of to_world_frame -- world frame -> the robot-base-local
+    frame every function in this module otherwise works in. Rotation
+    matrices are orthogonal, so the inverse rotation is just the
+    transpose."""
+    rotation = quaternion_to_rotation_matrix(base_orientation)
+    return rotation.T @ (np.asarray(world_point) - np.asarray(base_position))

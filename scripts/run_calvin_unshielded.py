@@ -197,6 +197,39 @@ def _log_clearance_debug(label, stats):
     )
 
 
+def _violated_steps_taken_percentiles(sequence_results):
+    """steps_taken (see run_calvin_unshielded_subtask's own docstring)
+    over VIOLATED attempts only -- answers "did the arm get a real
+    chance to move before hitting this obstacle": a small value means the
+    obstacle's own capture radius (obstacle.radius + whichever capsule
+    primitive is closest) is large relative to how far this chunk's
+    motion covers per replan window, not that the obstacle was placed
+    somewhere stale/wrong (obstacle_fn always samples from THIS subtask's
+    own real, current joint_angles/first candidate -- see
+    run_calvin_unshielded_subtask). None if nothing violated in this
+    sweep."""
+    steps = [a["steps_taken"] for attempts in sequence_results for a in attempts if a["violated"]]
+    if not steps:
+        return None
+    values = np.asarray(steps)
+    return {
+        "n": len(values), "mean": float(values.mean()), "median": float(np.median(values)),
+        "p10": float(np.percentile(values, 10)), "p90": float(np.percentile(values, 90)),
+        "min": int(values.min()), "max": int(values.max()),
+    }
+
+
+def _log_violated_steps_taken_debug(label, stats):
+    if stats is None:
+        _log(f"  [debug] {label}: nothing violated in this sweep")
+        return
+    _log(
+        f"  [debug] {label}: steps_taken over {stats['n']} VIOLATED attempts (does the arm get a "
+        f"real chance to move first?) -- mean={stats['mean']:.2f}  median={stats['median']:.2f}  "
+        f"p10={stats['p10']:.2f}  p90={stats['p90']:.2f}  min={stats['min']}  max={stats['max']}"
+    )
+
+
 def _rank_violating_sequence_idxs_by_length(sequence_results, top_k):
     """Sequence indices with at least one violated attempt, longest-
     running (most subtasks attempted before stopping) first -- picks
@@ -354,14 +387,24 @@ def main(cfg):
             "avg_seq_len": success_rate * 5,
             "n_sequences": cfg.num_sequences,
             "clearance_stats": None,
+            "violated_steps_taken_stats": None,
             "video_paths": None,
             "video_skip_reason": None,
+            # Full per-sequence, per-subtask-attempt records ('violated'/
+            # 'reached'/'min_clearance') -- lets shortstop.calvin_metrics.
+            # conservatism_cost pair this run against a shielded run's own
+            # sequence_results later, without a re-run (see
+            # scripts/run_calvin_shielded.py's identical field).
+            "sequence_results": sequence_results,
         }
 
         if cfg.debug:
             clearance_stats = _clearance_stats(sequence_results)
             entry["clearance_stats"] = clearance_stats
             _log_clearance_debug(label, clearance_stats)
+            steps_taken_stats = _violated_steps_taken_percentiles(sequence_results)
+            entry["violated_steps_taken_stats"] = steps_taken_stats
+            _log_violated_steps_taken_debug(label, steps_taken_stats)
             if obstacle_fn is not None:
                 vis_idxs = _rank_violating_sequence_idxs_by_length(sequence_results, cfg.num_videos)
                 if not vis_idxs:

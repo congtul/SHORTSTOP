@@ -12,6 +12,8 @@ import torch
 from shortstop.arm_shield import ArmConfThreshShield, ArmSTLMonitorShield
 from shortstop.arm_reach import propagate_arm_tube
 from shortstop.calvin_experiment import (
+    _base_transform_from_env,
+    _clearance,
     run_calvin_shielded_subtask,
     run_calvin_unshielded_sequence,
     run_calvin_unshielded_subtask,
@@ -21,6 +23,12 @@ from shortstop.env import Obstacle
 from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS, panda_frames
 
 SUBTASK = "fake_subtask"
+
+# A real, well-within-JOINT_LIMITS Franka "ready" pose -- NOT np.zeros: see
+# tests/test_arm_shield.py's own Q_HOME for why q=0 is itself physically
+# invalid for joint 4 alone, which matters for any test exercising a real
+# shield's select()/recertify() (now enforcing JOINT_LIMITS).
+Q_HOME = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
 
 
 class FakeEnv:
@@ -35,6 +43,7 @@ class FakeEnv:
         self.joint_angles = np.zeros(N_JOINTS)
         self.step_count = 0
         self.gripper_action = 1.0
+        self.gripper_width = 0.0  # closed by default -- matches the old fixed-radius model's floor
         self.scene_positions = {}
         self.last_gripper_action = None
 
@@ -45,6 +54,7 @@ class FakeEnv:
 
     def get_obs(self):
         robot_obs_raw = np.zeros(15, dtype=np.float32)
+        robot_obs_raw[6] = self.gripper_width
         robot_obs_raw[7:14] = self.joint_angles
         robot_obs_raw[14] = self.gripper_action
         return {"robot_obs_raw": torch.tensor(robot_obs_raw)}
@@ -141,7 +151,7 @@ def test_unshielded_subtask_succeeds_when_never_flagged():
         env, FakePolicy(), FakeTaskOracle(success_after_steps=12), FakeLangEmbeddings(), SUBTASK, VAL_ANNOTATIONS,
         ep_len=360, replan_steps=10, obstacle_fn=None,
     )
-    assert result == {"violated": False, "reached": True, "min_clearance": None}
+    assert result == {"violated": False, "reached": True, "min_clearance": None, "steps_taken": 12}
 
 
 def test_unshielded_subtask_stops_at_violation_and_never_reaches():
@@ -160,6 +170,58 @@ def test_unshielded_subtask_stops_at_violation_and_never_reaches():
     assert result["violated"] is True
     assert result["reached"] is False  # violated => never gets a chance to also succeed
     assert result["min_clearance"] <= 0.0  # violated => clearance hit zero/negative
+
+
+def test_base_transform_from_env_defaults_to_identity_without_env_dot_robot():
+    """FakeEnv (like every other test double in this file) has no
+    `.env.robot` chain at all -- _base_transform_from_env must fall back
+    to identity rather than raising, so g(a)'s new base-frame correction
+    (calvin_progress_scores's base_position/base_orientation) is a no-op
+    for every FakeEnv-based test in this file, exactly as before the fix."""
+    env = FakeEnv()
+    base_position, base_orientation = _base_transform_from_env(env)
+    assert base_position == (0.0, 0.0, 0.0)
+    assert base_orientation == (0.0, 0.0, 0.0, 1.0)
+
+
+def test_base_transform_from_env_reads_the_real_robot_base_pose_when_present():
+    class _FakeRobot:
+        base_position = [-0.34, -0.46, 0.24]
+        base_orientation = [0.0, 0.0, 0.0, 1.0]
+
+    class _FakeInnerEnv:
+        robot = _FakeRobot()
+
+    class _FakeWrapper:
+        env = _FakeInnerEnv()
+
+    base_position, base_orientation = _base_transform_from_env(_FakeWrapper())
+    assert base_position == [-0.34, -0.46, 0.24]
+    assert base_orientation == [0.0, 0.0, 0.0, 1.0]
+
+
+def test_clearance_tracks_the_real_gripper_width_not_a_fixed_worst_case_bound():
+    """Regression test for the finger_tip_capsules fix (Category A.4):
+    _clearance() used to assume the gripper was ALWAYS at its worst-case
+    (fully open) spread, regardless of the real, current
+    gripper_opening_width -- an obstacle placed exactly where an OPEN
+    finger's own tip would be must read as clear when the gripper is
+    actually closed, and as violated once it's actually open (same
+    joint_angles both times -- only gripper_width differs)."""
+    from shortstop.robot_geometry import finger_tip_capsules
+
+    env = FakeEnv()
+    env.reset()
+    q = np.array([0.0, 0.5, 0.0, -1.0, 0.0, 1.0, 0.0])  # unfolded -- avoids q=0's own degenerate self-overlap
+    env.joint_angles = q.copy()
+    (_, left_far), _ = finger_tip_capsules(q, gripper_width=0.08)
+    obstacle = Obstacle(center=left_far, radius=0.01)
+
+    env.gripper_width = 0.0
+    assert _clearance(env.get_obs(), obstacle) > 0.0  # closed -- finger nowhere near the obstacle
+
+    env.gripper_width = 0.08
+    assert _clearance(env.get_obs(), obstacle) <= 0.0  # open -- finger tip is exactly at the obstacle
 
 
 def test_violation_rate_and_success_rate_differ_with_vs_without_obstacle():
@@ -237,12 +299,29 @@ def test_shielded_subtask_wires_the_obstacle_into_an_obstacle_aware_shield_befor
     sample_obstacle_from_reference_chunk's real behavior) -- if the
     reordering fix works, that candidate is rejected on the very first
     decision; if the shield were still certifying against the stale
-    far-away placeholder, it would wrongly pass as admissible."""
+    far-away placeholder, it would wrongly pass as admissible.
+
+    Starts from Q_HOME (not np.zeros -- see this module's own Q_HOME
+    docstring) and moves along y (not x) for `other`: select() now also
+    enforces JOINT_LIMITS (see ArmReachOnlyShield._trajectory_within_
+    joint_limits), and a purely-x displacement large enough to clear the
+    flange's own inflation radius drives some joint well past its real
+    limit over 10 repeated rows -- verified directly (not guessed) that
+    this dx/dy pair stays within JOINT_LIMITS for both candidates while
+    still separating geometrically."""
     env = FakeEnv()
     env.reset()
+    env.joint_angles = Q_HOME.copy()
 
-    candidate = _joint0_chunk(0.1)
-    other = _joint0_chunk(-0.3)  # far enough opposite that it clears the flange's own inflation radius
+    def _xyz_chunk(dx, dy, dz, horizon=10):
+        chunk = np.zeros((horizon, 7))
+        chunk[:, 0] = dx
+        chunk[:, 1] = dy
+        chunk[:, 2] = dz
+        return chunk
+
+    candidate = _xyz_chunk(0.02, 0.0, 0.0)
+    other = _xyz_chunk(0.0, 0.2, 0.0)  # different axis -- clears the flange's own inflation radius
     policy = FakeMultiCandidatePolicy([candidate, other])
     task_oracle = FakeTaskOracleWithTasks(success_after_steps=10**9, tasks={})
 
@@ -258,7 +337,53 @@ def test_shielded_subtask_wires_the_obstacle_into_an_obstacle_aware_shield_befor
     )
 
     assert result["n_activated"] == 1  # candidate (candidates[0]) got rejected
-    assert env.joint_angles[0] < 0  # executed `other` instead
+    # `other`'s dx=0 -- FakeEnv's own dynamics (joint_angles[0] += action[0])
+    # only ever moves index 0, so it staying exactly unchanged from Q_HOME
+    # confirms `other` (not `candidate`, whose dx=0.02 would have moved it)
+    # is what actually got executed.
+    assert env.joint_angles[0] == Q_HOME[0]
+
+
+def test_shielded_subtask_reports_latency_and_ground_truth_rejection_precision():
+    """Regression test for the new generic metrics instrumentation
+    (shortstop.calvin_experiment._candidate_clearance +
+    run_calvin_shielded_subtask's latencies_ms/rejected_total/
+    rejected_truly_unsafe): reuses the exact same obstacle-placed-at-
+    candidate's-own-endpoint setup as the obstacle-wiring regression test
+    above, but checks the NEW fields instead. `candidate` genuinely hits
+    the obstacle (ground-truth clearance -0.11, confirmed directly) and
+    `other` genuinely clears it (+0.15) -- so this is a real, not a
+    false-positive, rejection: rejected_total and rejected_truly_unsafe
+    must both be 1, not just rejected_total."""
+    env = FakeEnv()
+    env.reset()
+    env.joint_angles = Q_HOME.copy()
+
+    def _xyz_chunk(dx, dy, dz, horizon=10):
+        chunk = np.zeros((horizon, 7))
+        chunk[:, 0] = dx
+        chunk[:, 1] = dy
+        chunk[:, 2] = dz
+        return chunk
+
+    candidate = _xyz_chunk(0.02, 0.0, 0.0)
+    other = _xyz_chunk(0.0, 0.2, 0.0)
+    policy = FakeMultiCandidatePolicy([candidate, other])
+    task_oracle = FakeTaskOracleWithTasks(success_after_steps=10**9, tasks={})
+    shield = ArmSTLMonitorShield(obstacles=[], epsilon=0.0)
+
+    def obstacle_fn(joint_angles, chunk):
+        return Obstacle(center=_predicted_endpoint(joint_angles, chunk), radius=0.05)
+
+    result = run_calvin_shielded_subtask(
+        env, policy, task_oracle, FakeLangEmbeddings(), SUBTASK, VAL_ANNOTATIONS, shield,
+        ep_len=10, replan_steps=10, obstacle_fn=obstacle_fn,
+    )
+
+    assert len(result["latencies_ms"]) == result["n_decisions"] == 1
+    assert all(t >= 0.0 for t in result["latencies_ms"])
+    assert result["rejected_total"] == 1
+    assert result["rejected_truly_unsafe"] == 1
 
 
 def test_shielded_subtask_fallback_holds_the_gripper_instead_of_forcing_it_closed():

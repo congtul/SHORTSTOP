@@ -7,6 +7,15 @@ from shortstop.arm_shield import (
 from shortstop.env import Obstacle
 from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS
 
+# A real, well-within-JOINT_LIMITS Franka "ready" pose -- NOT np.zeros:
+# joint 4 (index 3)'s own real range is entirely negative ([-3.0718,
+# -0.0698], see robot_geometry.JOINT_LIMITS), so q=0 is itself already
+# physically invalid for that joint alone. Every test below that exercises
+# a shield's actual select()/recertify() (which now enforce JOINT_LIMITS,
+# see ArmReachOnlyShield._trajectory_within_joint_limits) needs a
+# genuinely valid starting config, not the old placeholder.
+Q_HOME = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
+
 
 def _straight_chunk(dx, horizon=4):
     step = np.array([dx, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -14,7 +23,7 @@ def _straight_chunk(dx, horizon=4):
 
 
 def test_arm_reach_only_shield_rejects_a_chunk_that_hits_an_obstacle():
-    q = np.zeros(N_JOINTS)
+    q = Q_HOME
     unsafe = _straight_chunk(0.05)
     safe = _straight_chunk(-0.05)
 
@@ -32,7 +41,7 @@ def test_arm_reach_only_shield_rejects_a_chunk_that_hits_an_obstacle():
 
 
 def test_arm_stl_shield_rejects_within_margin_even_if_reach_only_would_accept():
-    q = np.zeros(N_JOINTS)
+    q = Q_HOME
     from shortstop.arm_reach import propagate_arm_tube
     from shortstop.robot_geometry import FLANGE_FRAME_INDEX
     chunk = _straight_chunk(0.05)
@@ -47,7 +56,7 @@ def test_arm_stl_shield_rejects_within_margin_even_if_reach_only_would_accept():
 
 
 def test_arm_stl_monitor_shield_rejects_a_chunk_that_hits_an_obstacle():
-    q = np.zeros(N_JOINTS)
+    q = Q_HOME
     unsafe = _straight_chunk(0.05)
     safe = _straight_chunk(-0.05)
 
@@ -62,7 +71,7 @@ def test_arm_stl_monitor_shield_rejects_a_chunk_that_hits_an_obstacle():
 
 
 def test_arm_stl_monitor_shield_picks_highest_score_among_admissible():
-    q = np.zeros(N_JOINTS)
+    q = Q_HOME
     a = _straight_chunk(0.05)
     b = _straight_chunk(0.03)
     # obstacle far from both candidates' paths -- both admissible
@@ -76,7 +85,7 @@ def test_arm_stl_monitor_shield_picks_highest_score_among_admissible():
 
 
 def test_arm_stl_monitor_shield_falls_back_when_every_candidate_hits_the_obstacle():
-    q = np.zeros(N_JOINTS)
+    q = Q_HOME
     a = _straight_chunk(0.05)
     b = _straight_chunk(0.05001)  # same direction, still ends up on the obstacle
     tube = propagate_arm_tube(q, a, w_bar=0.0, model_error=0.0)
@@ -100,7 +109,7 @@ def test_arm_stl_monitor_shield_epsilon_is_a_real_tunable_margin_not_hardcoded_z
     "shared epsilon" reading) -- if epsilon were still hardcoded to 0.0
     internally, the second shield would wrongly keep it admissible too.
     """
-    q = np.zeros(N_JOINTS)
+    q = Q_HOME
     candidate = _straight_chunk(0.05)
     other = _straight_chunk(-0.05)  # moves away -- stays admissible at every epsilon tested here
     tube = propagate_arm_tube(q, candidate, w_bar=0.0, model_error=0.0)
@@ -131,23 +140,29 @@ def test_recertify_matches_admissible_and_reacts_to_a_drifted_real_state():
     from shortstop.arm_reach import _step_joint_config
 
     remaining = _straight_chunk(0.05, horizon=2)  # the 2 rows still left to execute
-    tube = propagate_arm_tube(np.zeros(N_JOINTS), remaining, w_bar=0.0, model_error=0.0)
+    tube = propagate_arm_tube(Q_HOME, remaining, w_bar=0.0, model_error=0.0)
     obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
     shield = ArmSTLMonitorShield(obstacles=[obstacle], epsilon=0.0)
 
-    # from the nominal state (q=0) the remaining suffix runs straight into
-    # the obstacle -- recertify must reject it, same as _admissible would.
-    assert shield.recertify(np.zeros(N_JOINTS), remaining) is False
+    # from the nominal state (Q_HOME) the remaining suffix runs straight
+    # into the obstacle -- recertify must reject it, same as _admissible
+    # would.
+    assert shield.recertify(Q_HOME, remaining) is False
 
     # from a real state that has already drifted safely away -- reached by
-    # actually taking 2 steps in the opposite (-0.3/step) task-space
+    # actually taking 2 steps in the opposite (-0.15/step) task-space
     # direction, not a hand-picked joint value -- the same remaining
-    # suffix clears the obstacle by a wide margin (robustness computed
-    # directly: +0.39, via propagate_arm_tube/arm_robustness_to_go against
-    # this exact obstacle). recertify must accept it.
-    drifted_joint_angles = np.zeros(N_JOINTS)
+    # suffix clears the obstacle by a margin (robustness computed
+    # directly: +0.065, via propagate_arm_tube/arm_robustness_to_go
+    # against this exact obstacle) while staying within JOINT_LIMITS
+    # throughout (a larger -0.3/step drift would clear the obstacle by
+    # more but blows past joint 2's own limit partway through -- recertify
+    # correctly rejects that for a DIFFERENT reason, so it's not usable
+    # here to isolate the geometric-clearance behavior this test targets).
+    # recertify must accept it.
+    drifted_joint_angles = Q_HOME.copy()
     for _ in range(2):
-        drifted_joint_angles = _step_joint_config(drifted_joint_angles, np.array([-0.3, 0.0, 0.0]))
+        drifted_joint_angles = _step_joint_config(drifted_joint_angles, np.array([-0.15, 0.0, 0.0]))
     assert shield.recertify(drifted_joint_angles, remaining) is True
 
     # ArmConfThreshShield has no cheap per-step re-check at all (see its
@@ -157,16 +172,20 @@ def test_recertify_matches_admissible_and_reacts_to_a_drifted_real_state():
 
 
 def test_arm_repair_shield_fixes_a_rejected_candidate_and_still_certifies_it():
-    q = np.zeros(N_JOINTS)
+    q = Q_HOME
     from shortstop.arm_reach import propagate_arm_tube
     from shortstop.robot_geometry import FLANGE_FRAME_INDEX
     chunk = _straight_chunk(0.05)
     tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
     obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
 
+    # trust_region widened from 0.2 (worked at the old q=0 placeholder) to
+    # 0.3 -- Q_HOME's own Jacobian geometry needs slightly more room for
+    # the same 3-iteration repair to actually converge; verified directly
+    # (not guessed) before picking this value.
     shield = ArmRepairShield(
         obstacles=[obstacle], w_bar=0.0, model_error=0.0, epsilon=0.02,
-        trust_region=0.2, step_size=0.1, max_repair_iters=3,
+        trust_region=0.3, step_size=0.1, max_repair_iters=3,
     )
     action, info = shield.select(q, [chunk], scores=[1.0])
 
@@ -177,7 +196,7 @@ def test_arm_repair_shield_fixes_a_rejected_candidate_and_still_certifies_it():
 
 
 def test_arm_repair_shield_falls_back_when_repair_cannot_fix_it_in_time():
-    q = np.zeros(N_JOINTS)
+    q = Q_HOME
     chunk = _straight_chunk(0.05)
     from shortstop.arm_reach import propagate_arm_tube
     from shortstop.robot_geometry import FLANGE_FRAME_INDEX

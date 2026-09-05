@@ -184,6 +184,29 @@ def _shield_activation_rate(sequence_results):
     return n_activated / n_decisions
 
 
+def _latency_stats(sequence_results):
+    """Identical to scripts/run_calvin_shielded.py's own helper -- mean/
+    median/p95 latency_ms over every decision."""
+    all_latencies = [t for attempts in sequence_results for a in attempts for t in a["latencies_ms"]]
+    if not all_latencies:
+        return None
+    values = np.asarray(all_latencies)
+    return {
+        "n": len(values), "mean": float(values.mean()), "median": float(np.median(values)),
+        "p95": float(np.percentile(values, 95)),
+    }
+
+
+def _intervention_precision(sequence_results):
+    """Identical to scripts/run_calvin_shielded.py's own helper -- pooled
+    rejected_truly_unsafe/rejected_total across every decision."""
+    total_rejected = sum(a["rejected_total"] for attempts in sequence_results for a in attempts)
+    total_truly_unsafe = sum(a["rejected_truly_unsafe"] for attempts in sequence_results for a in attempts)
+    if total_rejected == 0:
+        return None
+    return total_truly_unsafe / total_rejected
+
+
 def _robustness_percentiles(robustness_samples):
     if not robustness_samples:
         return None
@@ -304,11 +327,21 @@ def _run_one_epsilon(
     slots = build_fixed_cohort_slots(sequence_results, subtasks_per_sequence=5)
     violation_rate, success_rate = fixed_cohort_rates(slots)
     activation_rate = _shield_activation_rate(sequence_results)
+    latency_stats = _latency_stats(sequence_results)
+    intervention_precision = _intervention_precision(sequence_results)
     _log(
         f"[{label}] violation_rate={violation_rate:.3f}  success_rate={success_rate:.3f}  "
         f"shield_activation_rate={activation_rate:.3f}  (avg_seq_len={success_rate * 5:.2f}/5, "
         f"n_sequences={cfg.num_sequences})"
     )
+    precision_str = "n/a" if intervention_precision is None else f"{intervention_precision:.3f}"
+    if latency_stats is not None:
+        _log(
+            f"  latency_ms_mean={latency_stats['mean']:.3f}  latency_ms_median={latency_stats['median']:.3f}  "
+            f"latency_ms_p95={latency_stats['p95']:.3f}  intervention_precision={precision_str}"
+        )
+    else:
+        _log("  (no decisions recorded any latency)")
 
     entry = {
         "label": label,
@@ -318,9 +351,14 @@ def _run_one_epsilon(
         "shield_activation_rate": activation_rate,
         "avg_seq_len": success_rate * 5,
         "n_sequences": cfg.num_sequences,
+        "latency_ms": latency_stats,
+        "intervention_precision": intervention_precision,
         "clearance_stats": None,
         "video_paths": None,
         "video_skip_reason": None,
+        # Full per-sequence, per-subtask-attempt records -- see
+        # scripts/run_calvin_shielded.py's identical field for why.
+        "sequence_results": sequence_results,
     }
 
     if cfg.debug:

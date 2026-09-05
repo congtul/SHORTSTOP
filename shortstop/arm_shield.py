@@ -28,8 +28,8 @@ itself, and shortstop/robot_geometry.py's for the sphere-chain geometry.
 """
 import numpy as np
 
-from .arm_reach import arm_find_counterexample, arm_robustness_to_go, propagate_arm_tube
-from .robot_geometry import FLANGE_FRAME_INDEX
+from .arm_reach import arm_find_counterexample, arm_robustness_to_go, nominal_joint_trajectory, propagate_arm_tube
+from .robot_geometry import FLANGE_FRAME_INDEX, within_joint_limits
 
 
 class ArmReachOnlyShield:
@@ -41,7 +41,19 @@ class ArmReachOnlyShield:
         self.w_bar = w_bar
         self.model_error = model_error
 
+    def _trajectory_within_joint_limits(self, joint_angles, task_chunk):
+        """A candidate whose nominal joint trajectory ever exits
+        robot_geometry.JOINT_LIMITS isn't physically executable by the
+        real robot's own safety controller, regardless of obstacle
+        clearance -- checked separately from (and before) the obstacle
+        certify step, same cost class (one more Jacobian-stepping pass,
+        no reachtube/obstacle math needed)."""
+        trajectory = nominal_joint_trajectory(joint_angles, task_chunk)
+        return all(within_joint_limits(q) for q in trajectory[1:])
+
     def _admissible(self, joint_angles, task_chunk):
+        if not self._trajectory_within_joint_limits(joint_angles, task_chunk):
+            return False
         tube = propagate_arm_tube(joint_angles, task_chunk, self.w_bar, self.model_error)
         return arm_robustness_to_go(tube, self.obstacles) >= 0.0
 
@@ -84,6 +96,8 @@ class ArmSTLShield(ArmReachOnlyShield):
         self.epsilon = epsilon
 
     def _admissible(self, joint_angles, task_chunk):
+        if not self._trajectory_within_joint_limits(joint_angles, task_chunk):
+            return False
         tube = propagate_arm_tube(joint_angles, task_chunk, self.w_bar, self.model_error)
         return arm_robustness_to_go(tube, self.obstacles) >= self.epsilon
 
@@ -161,7 +175,14 @@ class ArmRepairShield(ArmSTLShield):
                 chunk = original + delta * (self.trust_region / norm)
 
             tube = propagate_arm_tube(joint_angles, chunk, self.w_bar, self.model_error)
-            if arm_robustness_to_go(tube, self.obstacles) >= self.epsilon:
+            # A repaired chunk must still respect JOINT_LIMITS, not just
+            # clear the obstacle -- pushing away from an obstacle in
+            # task-space can drive the Jacobian-IK joint solution past a
+            # real physical limit even when the obstacle margin looks fine.
+            if (
+                self._trajectory_within_joint_limits(joint_angles, chunk)
+                and arm_robustness_to_go(tube, self.obstacles) >= self.epsilon
+            ):
                 return chunk, True
             ce = arm_find_counterexample(tube, self.obstacles)
         return chunk, False
@@ -173,8 +194,9 @@ class ArmRepairShield(ArmSTLShield):
         repair_succeeded = False
 
         for i, chunk in enumerate(candidates):
+            joint_limits_ok = self._trajectory_within_joint_limits(joint_angles, chunk)
             tube = propagate_arm_tube(joint_angles, chunk, self.w_bar, self.model_error)
-            if arm_robustness_to_go(tube, self.obstacles) >= self.epsilon:
+            if joint_limits_ok and arm_robustness_to_go(tube, self.obstacles) >= self.epsilon:
                 mask.append(True)
                 continue
             repair_attempted = True
