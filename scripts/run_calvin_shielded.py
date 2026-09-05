@@ -2,9 +2,10 @@
 wired into the CALVIN eval loop -- Propose K candidates -> reject on
 sampler-ensemble disagreement (docs/main (3).txt Sec. V.D) -> Select by
 shortstop.calvin_progress's g(a) (a kinematic goal-distance proxy, see
-that module's docstring). The privileged obstacle (radius=0.08, already
-tuned -- see docs/PARAMETERS_REFERENCE.md) is still injected exactly as
-in scripts/run_calvin_unshielded.py, purely for ground-truth measurement
+that module's docstring). The privileged obstacle (radius=0.08,
+offset_max=0.6, already tuned -- see docs/PARAMETERS_REFERENCE.md) is
+still injected exactly as in scripts/run_calvin_unshielded.py, purely for
+ground-truth measurement
 -- Conf-Thresh's own filter never sees it (see shortstop.arm_shield.
 ArmConfThreshShield's docstring).
 
@@ -86,11 +87,18 @@ N_CANDIDATES = 8
 # full writeup). Back to =10 (ratio 1.0, matching act_window_size).
 REPLAN_STEPS = 10
 
-# Obstacle radius: already tuned at this same REPLAN_STEPS=10, see
+# Obstacle radius/offset: already tuned at this same REPLAN_STEPS=10, see
 # docs/PARAMETERS_REFERENCE.md / scripts/run_calvin_unshielded.py's own
-# RADII_TO_SWEEP comment. Re-tune there (not here) if the checkpoint/
-# dataset or REPLAN_STEPS ever change again.
+# RADII_TO_SWEEP/OBSTACLE_OFFSET_MAX comments. Re-tune there (not here) if
+# the checkpoint/dataset or REPLAN_STEPS ever change again. Both must be
+# passed explicitly (not left to sample_obstacle_from_reference_chunk's
+# own defaults) -- found 2026-09-06 that this script was silently using a
+# stale offset_max=0.3 (the function's old default) while
+# run_calvin_unshielded.py had already moved its own sweep to 0.6, which
+# would have made this baseline's obstacle placement meaningfully harder
+# than the unshielded run it's supposed to be compared against.
 OBSTACLE_RADIUS = 0.08
+OBSTACLE_OFFSET_MAX = 0.6
 
 # Candidate disagreement_threshold values to sweep (meters, same units as
 # the endpoint-vs-centroid distance ArmConfThreshShield computes) --
@@ -337,7 +345,7 @@ def _run_one_threshold(
         # this must be a caller-seeded, non-global RNG.
         obstacle_rng = np.random.default_rng(sequence_seed_base + idx)
         obstacle_fn = lambda joint_angles, chunk, rng=obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731
-            joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng,
+            joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng, offset_max=OBSTACLE_OFFSET_MAX,
         )
         attempts = run_calvin_shielded_sequence(
             env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
@@ -414,7 +422,7 @@ def _run_one_threshold(
                 # different random draw.
                 video_obstacle_rng = np.random.default_rng(sequence_seed_base + vis_idx)
                 video_obstacle_fn = lambda joint_angles, chunk, rng=video_obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731,E501
-                    joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng,
+                    joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng, offset_max=OBSTACLE_OFFSET_MAX,
                 )
                 video_paths += _save_debug_videos(
                     vis_idx, threshold, video_obstacle_fn, shield, env, policy, task_oracle, lang_embeddings,
@@ -435,7 +443,8 @@ def main(cfg):
          f"-- pass --tuning to switch (see docs/TUNING_WORKFLOW.md muc 0)")
     _log(f"[run] config: num_sequences={cfg.num_sequences} ep_len={cfg.ep_len} replan_steps={REPLAN_STEPS} "
          f"sampler_type={cfg.sampler_type} num_sampling_steps={cfg.num_sampling_steps} debug={cfg.debug} "
-         f"n_candidates={N_CANDIDATES} obstacle_radius={OBSTACLE_RADIUS}")
+         f"n_candidates={N_CANDIDATES} obstacle_radius={OBSTACLE_RADIUS} "
+         f"obstacle_offset_max={OBSTACLE_OFFSET_MAX}")
 
     seed_everything(0, workers=True)
 

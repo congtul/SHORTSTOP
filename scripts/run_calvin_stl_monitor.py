@@ -103,6 +103,13 @@ from shortstop.mdt_policy_client import ForwardOnlyPolicy  # noqa: E402
 N_CANDIDATES = 8
 REPLAN_STEPS = 10
 OBSTACLE_RADIUS = 0.08
+# Must match run_calvin_unshielded.py's OBSTACLE_OFFSET_MAX exactly, not
+# sample_obstacle_from_reference_chunk's own default -- see that
+# function's docstring / calvin_obstacle_offset_floor_too_high memory for
+# why relying on the shared default silently made this baseline's
+# obstacle placement harder than the unshielded run it's compared
+# against (found + fixed 2026-09-06).
+OBSTACLE_OFFSET_MAX = 0.6
 
 # Candidate epsilon values to sweep (meters, same units as
 # arm_robustness_to_go -- a signed distance) -- PLACEHOLDER, not yet
@@ -315,7 +322,7 @@ def _run_one_epsilon(
         # this is a fresh, caller-seeded, non-global rng per sequence.
         obstacle_rng = np.random.default_rng(sequence_seed_base + idx)
         obstacle_fn = lambda joint_angles, chunk, rng=obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731
-            joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng,
+            joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng, offset_max=OBSTACLE_OFFSET_MAX,
         )
         attempts = run_calvin_shielded_sequence(
             env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
@@ -384,7 +391,7 @@ def _run_one_epsilon(
                 # exact placement that sequence actually saw.
                 video_obstacle_rng = np.random.default_rng(sequence_seed_base + vis_idx)
                 video_obstacle_fn = lambda joint_angles, chunk, rng=video_obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731,E501
-                    joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng,
+                    joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng, offset_max=OBSTACLE_OFFSET_MAX,
                 )
                 video_paths += _save_debug_videos(
                     vis_idx, epsilon, video_obstacle_fn, shield, env, policy, task_oracle, lang_embeddings,
@@ -405,7 +412,8 @@ def main(cfg):
          f"-- pass --tuning to switch (see docs/TUNING_WORKFLOW.md muc 0)")
     _log(f"[run] config: num_sequences={cfg.num_sequences} ep_len={cfg.ep_len} replan_steps={REPLAN_STEPS} "
          f"sampler_type={cfg.sampler_type} num_sampling_steps={cfg.num_sampling_steps} debug={cfg.debug} "
-         f"n_candidates={N_CANDIDATES} obstacle_radius={OBSTACLE_RADIUS}")
+         f"n_candidates={N_CANDIDATES} obstacle_radius={OBSTACLE_RADIUS} "
+         f"obstacle_offset_max={OBSTACLE_OFFSET_MAX}")
 
     seed_everything(0, workers=True)
 

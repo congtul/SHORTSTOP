@@ -74,6 +74,13 @@ from shortstop.calvin_obstacle import sample_obstacle_from_reference_chunk  # no
 N_CANDIDATES = 8
 REPLAN_STEPS = 10
 OBSTACLE_RADIUS = 0.08
+# Must match run_calvin_unshielded.py's OBSTACLE_OFFSET_MAX exactly, not
+# sample_obstacle_from_reference_chunk's own default -- see that
+# function's docstring / calvin_obstacle_offset_floor_too_high memory for
+# why relying on the shared default silently made this baseline's
+# obstacle placement harder than the unshielded run it's compared
+# against (found + fixed 2026-09-06).
+OBSTACLE_OFFSET_MAX = 0.6
 
 # model_error -- PLACEHOLDER (ArmReachOnlyShield's generic default) until
 # scripts/calibrate_arm_model_error.py has run for real. w_bar=0.0 always
@@ -115,7 +122,7 @@ def _run_one_config(
         # this is a fresh, caller-seeded, non-global rng per sequence.
         obstacle_rng = np.random.default_rng(sequence_seed_base + idx)
         obstacle_fn = lambda joint_angles, chunk, rng=obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731
-            joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng,
+            joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng, offset_max=OBSTACLE_OFFSET_MAX,
         )
         attempts = run_calvin_shielded_sequence(
             env, policy, task_oracle, lang_embeddings, initial_state, eval_sequence, val_annotations,
@@ -187,7 +194,7 @@ def _run_one_config(
                 # exact placement that sequence actually saw.
                 video_obstacle_rng = np.random.default_rng(sequence_seed_base + vis_idx)
                 video_obstacle_fn = lambda joint_angles, chunk, rng=video_obstacle_rng: sample_obstacle_from_reference_chunk(  # noqa: E731,E501
-                    joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng,
+                    joint_angles, chunk, radius=OBSTACLE_RADIUS, rng=rng, offset_max=OBSTACLE_OFFSET_MAX,
                 )
                 video_paths += save_debug_videos(
                     run_output_dir, run_output_dir / "videos", vis_idx, safe_label, video_obstacle_fn, shield, env,
@@ -209,7 +216,8 @@ def main(cfg):
         f"-- pass --tuning to switch (see docs/TUNING_WORKFLOW.md muc 0)")
     log(f"[run] config: num_sequences={cfg.num_sequences} ep_len={cfg.ep_len} replan_steps={REPLAN_STEPS} "
         f"sampler_type={cfg.sampler_type} num_sampling_steps={cfg.num_sampling_steps} debug={cfg.debug} "
-        f"n_candidates={N_CANDIDATES} obstacle_radius={OBSTACLE_RADIUS} model_error={MODEL_ERROR}")
+        f"n_candidates={N_CANDIDATES} obstacle_radius={OBSTACLE_RADIUS} "
+        f"obstacle_offset_max={OBSTACLE_OFFSET_MAX} model_error={MODEL_ERROR}")
 
     seed_everything(0, workers=True)
     env, policy, task_oracle, val_annotations, lang_embeddings = setup_env_and_policy(cfg, N_CANDIDATES)

@@ -44,7 +44,7 @@ def _perpendicular_basis(direction_unit):
 
 def sample_obstacle_from_reference_chunk(
     joint_angles, reference_chunk, radius=0.08, frame_index=None,
-    horizon_multiplier=2, offset_max=0.3, rng=None,
+    horizon_multiplier=2, offset_max=0.6, rng=None,
 ):
     """Place an obstacle near (not exactly at) the endpoint of
     `reference_chunk`'s own nominal (w_bar=0, model_error=0) reach-tube.
@@ -62,33 +62,39 @@ def sample_obstacle_from_reference_chunk(
     deliberately-separate mechanisms fix this (see docs/PARAMETERS_
     REFERENCE.md's "radius" entry for the full writeup):
 
-    1. `horizon_multiplier` (default 2, a placeholder pending a real
-       sweep): the reachtube is propagated over `reference_chunk` TILED
-       this many times (`np.tile`), not the raw chunk alone -- extends
-       how far along the SAME general direction the target sits, giving
-       more real steps of runway before the arm could possibly reach it
-       (directly answers "does the arm get a real chance to move" --
-       see calvin_experiment.run_calvin_unshielded_subtask's own
+    1. `horizon_multiplier` (default 2, still an unverified placeholder --
+       not yet independently swept, see "How to apply" in the
+       calvin_obstacle_offset_floor_too_high memory): the reachtube is
+       propagated over `reference_chunk` TILED this many times
+       (`np.tile`), not the raw chunk alone -- extends how far along the
+       SAME general direction the target sits, giving more real steps of
+       runway before the arm could possibly reach it (directly answers
+       "does the arm get a real chance to move" -- see
+       calvin_experiment.run_calvin_unshielded_subtask's own
        `steps_taken` diagnostic). Reuses propagate_arm_tube's own
        per-step re-linearization unchanged (each tiled repetition still
        re-computes the Jacobian from the updated joint config, not a
        stale one) -- self-scales to whatever this chunk's own real pace
        is, rather than guessing an absolute extra distance.
-    2. `offset_max` + `rng` (default `offset_max=0.3`, a placeholder
-       pending a real sweep; `rng=None` skips this entirely, keeping the
-       OLD exact-endpoint behavior for any caller not yet passing an
-       `rng`): a random point offset from the endpoint, in the plane
-       PERPENDICULAR to the direction of travel, magnitude drawn
-       Uniform(0, offset_max) -- makes `radius` a meaningful difficulty
-       knob again (a point placed exactly on the centerline is swept
-       regardless of `radius`'s own value, since the arm's own primitive
-       thickness alone already exceeds most tested radii; a random
-       perpendicular miss distance is what `radius` can then meaningfully
-       compete against). Deliberately NOT sourced from `model_error`/
-       `w_bar` -- those are the shield's own calibrated, deliberately-
-       tight uncertainty budget, not a benchmark-difficulty generator;
-       conflating them would mean a future recalibration silently
-       changes this benchmark's own difficulty. `rng` must be an
+    2. `offset_max` + `rng` (default `offset_max=0.6` -- CONFIRMED
+       2026-09-06 by a real sweep, see docs/PARAMETERS_REFERENCE.md's
+       "radius" entry: this value made the r=0.0/point-obstacle floor
+       drop from 0.522 to 0.269 attempted-subtask violation fraction,
+       within 1pp of the value simple scaling predicts, confirming this
+       is a clean, well-behaved lever, not noise; `rng=None` skips this
+       entirely, keeping the OLD exact-endpoint behavior for any caller
+       not yet passing an `rng`): a random point offset from the
+       endpoint, in the plane PERPENDICULAR to the direction of travel,
+       magnitude drawn Uniform(0, offset_max) -- makes `radius` a
+       meaningful difficulty knob again (a point placed exactly on the
+       centerline is swept regardless of `radius`'s own value, since the
+       arm's own primitive thickness alone already exceeds most tested
+       radii; a random perpendicular miss distance is what `radius` can
+       then meaningfully compete against). Deliberately NOT sourced from
+       `model_error`/`w_bar` -- those are the shield's own calibrated,
+       deliberately-tight uncertainty budget, not a benchmark-difficulty
+       generator; conflating them would mean a future recalibration
+       silently changes this benchmark's own difficulty. `rng` must be an
        explicit `numpy.random.Generator` the CALLER seeds reproducibly
        (e.g. per-sequence, so a radius sweep compares the same random
        placement across every radius) -- deliberately NOT drawn from
@@ -98,9 +104,20 @@ def sample_obstacle_from_reference_chunk(
        "with vs without obstacle follows the identical trajectory"
        property run_calvin_unshielded_subtask's own docstring relies on.
 
-    `radius` defaults to 0.08 -- STALE, from a sweep now invalidated by
-    this same fix (needs a fresh sweep) -- see docs/PARAMETERS_
-    REFERENCE.md muc 1's "radius" entry.
+    **IMPORTANT -- every CALVIN driver script must pass the SAME
+    `radius`/`offset_max` explicitly** (each already declares its own
+    `OBSTACLE_RADIUS`/`OBSTACLE_OFFSET_MAX` module constant rather than
+    relying on these function defaults) -- a script that silently relies
+    on this function's own default while another script overrides it is
+    comparing two DIFFERENT obstacle difficulties, not the same benchmark
+    under a different shield (found 2026-09-06: run_calvin_unshielded.py
+    had already moved to offset_max=0.6 while every shielded baseline
+    script was still silently getting 0.3 from this default -- fixed by
+    adding the same explicit constant everywhere).
+
+    `radius` defaults to 0.08 -- chosen 2026-09-06 (with offset_max=0.6),
+    see docs/PARAMETERS_REFERENCE.md muc 1's "radius" entry for the full
+    sweep table.
 
     `frame_index`: which panda_frames() point (0..8) to sample from --
     defaults to the flange (FLANGE_FRAME_INDEX), i.e. the end of the
