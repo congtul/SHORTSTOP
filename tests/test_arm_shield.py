@@ -1,7 +1,9 @@
 import numpy as np
 
 from shortstop.arm_reach import propagate_arm_tube
-from shortstop.arm_shield import ArmConfThreshShield, ArmReachOnlyShield, ArmRepairShield, ArmSTLShield
+from shortstop.arm_shield import (
+    ArmConfThreshShield, ArmReachOnlyShield, ArmRepairShield, ArmSTLMonitorShield, ArmSTLShield,
+)
 from shortstop.env import Obstacle
 from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS
 
@@ -42,6 +44,116 @@ def test_arm_stl_shield_rejects_within_margin_even_if_reach_only_would_accept():
     shield = ArmSTLShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0, epsilon=0.05)
     _, info = shield.select(q, [chunk], scores=[1.0])
     assert info["admissible_mask"] == [False]
+
+
+def test_arm_stl_monitor_shield_rejects_a_chunk_that_hits_an_obstacle():
+    q = np.zeros(N_JOINTS)
+    unsafe = _straight_chunk(0.05)
+    safe = _straight_chunk(-0.05)
+
+    tube = propagate_arm_tube(q, unsafe, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+
+    shield = ArmSTLMonitorShield(obstacles=[obstacle], epsilon=0.0)
+    action, info = shield.select(q, [unsafe, safe], scores=[1.0, 0.0])
+
+    assert info["admissible_mask"] == [False, True]
+    assert np.allclose(action, safe)
+
+
+def test_arm_stl_monitor_shield_picks_highest_score_among_admissible():
+    q = np.zeros(N_JOINTS)
+    a = _straight_chunk(0.05)
+    b = _straight_chunk(0.03)
+    # obstacle far from both candidates' paths -- both admissible
+    obstacle = Obstacle(center=np.array([10.0, 10.0, 10.0]), radius=0.05)
+
+    shield = ArmSTLMonitorShield(obstacles=[obstacle], epsilon=0.0)
+    action, info = shield.select(q, [a, b], scores=[1.0, 5.0])
+
+    assert info["admissible_mask"] == [True, True]
+    assert np.allclose(action, b)  # higher score (5.0 > 1.0), not the first candidate
+
+
+def test_arm_stl_monitor_shield_falls_back_when_every_candidate_hits_the_obstacle():
+    q = np.zeros(N_JOINTS)
+    a = _straight_chunk(0.05)
+    b = _straight_chunk(0.05001)  # same direction, still ends up on the obstacle
+    tube = propagate_arm_tube(q, a, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+
+    shield = ArmSTLMonitorShield(obstacles=[obstacle], epsilon=0.0)
+    action, info = shield.select(q, [a, b], scores=[1.0, 2.0])
+
+    assert info["fallback"]
+    assert np.allclose(action, np.zeros_like(a))
+
+
+def test_arm_stl_monitor_shield_epsilon_is_a_real_tunable_margin_not_hardcoded_zero():
+    """Regression test for making `epsilon` an explicit, required
+    constructor arg (see ArmSTLMonitorShield's docstring on the paper's
+    two conflicting readings of its threshold): a candidate whose nominal
+    robustness is small and POSITIVE (0.04, computed directly via
+    propagate_arm_tube/arm_robustness_to_go against this exact obstacle)
+    must stay admissible at epsilon=0.0 ("rejects if negative", literal
+    reading) but get rejected once epsilon is raised past it (0.05,
+    "shared epsilon" reading) -- if epsilon were still hardcoded to 0.0
+    internally, the second shield would wrongly keep it admissible too.
+    """
+    q = np.zeros(N_JOINTS)
+    candidate = _straight_chunk(0.05)
+    other = _straight_chunk(-0.05)  # moves away -- stays admissible at every epsilon tested here
+    tube = propagate_arm_tube(q, candidate, w_bar=0.0, model_error=0.0)
+    endpoint = tube[-1][FLANGE_FRAME_INDEX].center()
+    obstacle = Obstacle(center=endpoint + np.array([0.25, 0.0, 0.0]), radius=0.05)
+
+    lenient = ArmSTLMonitorShield(obstacles=[obstacle], epsilon=0.0)
+    action, info = lenient.select(q, [candidate, other], scores=[2.0, 1.0])
+    assert info["admissible_mask"] == [True, True]
+    assert np.allclose(action, candidate)  # higher score, still admissible at epsilon=0.0
+
+    strict = ArmSTLMonitorShield(obstacles=[obstacle], epsilon=0.05)
+    action, info = strict.select(q, [candidate, other], scores=[2.0, 1.0])
+    assert info["admissible_mask"] == [False, True]  # same candidate now rejected
+    assert np.allclose(action, other)
+
+
+def test_recertify_matches_admissible_and_reacts_to_a_drifted_real_state():
+    """`recertify()` (shortstop.arm_shield.ArmReachOnlyShield, inherited by
+    ArmSTLShield/ArmSTLMonitorShield/ArmRepairShield -- see
+    docs/PARAMETERS_REFERENCE.md's "tach tan suat filter khoi policy" entry
+    for why this is feasible for these shields but not ArmConfThreshShield)
+    is just `_admissible()` under a name the harness calls every real
+    env-step, not only at Propose time: same reject-if-below-epsilon
+    decision, just against a chunk SUFFIX from whatever real joint state
+    the caller passes in -- which may have drifted from the nominal state
+    `select()` originally certified against."""
+    from shortstop.arm_reach import _step_joint_config
+
+    remaining = _straight_chunk(0.05, horizon=2)  # the 2 rows still left to execute
+    tube = propagate_arm_tube(np.zeros(N_JOINTS), remaining, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+    shield = ArmSTLMonitorShield(obstacles=[obstacle], epsilon=0.0)
+
+    # from the nominal state (q=0) the remaining suffix runs straight into
+    # the obstacle -- recertify must reject it, same as _admissible would.
+    assert shield.recertify(np.zeros(N_JOINTS), remaining) is False
+
+    # from a real state that has already drifted safely away -- reached by
+    # actually taking 2 steps in the opposite (-0.3/step) task-space
+    # direction, not a hand-picked joint value -- the same remaining
+    # suffix clears the obstacle by a wide margin (robustness computed
+    # directly: +0.39, via propagate_arm_tube/arm_robustness_to_go against
+    # this exact obstacle). recertify must accept it.
+    drifted_joint_angles = np.zeros(N_JOINTS)
+    for _ in range(2):
+        drifted_joint_angles = _step_joint_config(drifted_joint_angles, np.array([-0.3, 0.0, 0.0]))
+    assert shield.recertify(drifted_joint_angles, remaining) is True
+
+    # ArmConfThreshShield has no cheap per-step re-check at all (see its
+    # own docstring) -- the harness's `hasattr(shield, "recertify")` guard
+    # depends on this staying true.
+    assert not hasattr(ArmConfThreshShield(disagreement_threshold=1.0, replan_steps=10), "recertify")
 
 
 def test_arm_repair_shield_fixes_a_rejected_candidate_and_still_certifies_it():

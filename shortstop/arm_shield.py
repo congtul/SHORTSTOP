@@ -56,6 +56,24 @@ class ArmReachOnlyShield:
             "fallback": False, "n_admissible": len(admissible_idx), "admissible_mask": mask,
         }
 
+    def recertify(self, joint_angles, remaining_chunk):
+        """Cheap per-step re-check of an already-selected chunk's
+        remaining tail against the REAL current state -- lets the harness
+        (shortstop.calvin_experiment.run_calvin_shielded_subtask) refresh
+        certification every real env-step even though Propose (K new
+        diffusion samples) only runs every `replan_steps` steps. See
+        docs/PARAMETERS_REFERENCE.md's "tach tan suat filter khoi policy"
+        entry: feasible here (and for every ArmReachOnlyShield/ArmSTLShield
+        subclass -- ArmSTLMonitorShield, ArmRepairShield) because Certify
+        only needs propagate_arm_tube on the current real state, no fresh
+        K-candidate sample -- unlike ArmConfThreshShield, whose
+        disagreement is tied to one specific K-sample and has no
+        `recertify` at all (see its own docstring). Reuses the exact same
+        admissibility test `select()` applies at Propose time, just
+        against a shorter suffix from a possibly-drifted real state
+        instead of the nominal one assumed when this chunk was chosen."""
+        return self._admissible(joint_angles, remaining_chunk)
+
 
 class ArmSTLShield(ArmReachOnlyShield):
     """Stage 2 equivalent: STL robustness-to-go margin (Eq. 2) instead of a
@@ -68,6 +86,33 @@ class ArmSTLShield(ArmReachOnlyShield):
     def _admissible(self, joint_angles, task_chunk):
         tube = propagate_arm_tube(joint_angles, task_chunk, self.w_bar, self.model_error)
         return arm_robustness_to_go(tube, self.obstacles) >= self.epsilon
+
+
+class ArmSTLMonitorShield(ArmSTLShield):
+    """Table II's STL-Monitor baseline (docs/main (3).txt Sec. V.D):
+    nominal STL robustness on the f-hat rollout, no reachtube, no
+    counterexample search. Exactly ArmSTLShield with the disturbance/
+    model-error bound zeroed: w_bar=0/model_error=0 (the tube still
+    inflates by each frame's own physical radius regardless, since that's
+    real geometry, not an uncertainty bound). No repair -- unlike
+    ArmRepairShield below, a rejected chunk is simply dropped from the
+    admissible set, never nudged back toward safety.
+
+    `epsilon` is a required, explicit argument, NOT hardcoded -- the
+    paper's own text is ambiguous about its value here. Sec. IV says
+    STL-Monitor "rejects if negative" (literal reading: epsilon=0.0), but
+    the very next sentence says "All model-based baselines use the
+    identical f-hat, epsilon and fallback for a fair comparison" (shared
+    reading: epsilon = ShortStop's own calibrated margin, 0.02 in this
+    codebase's default budgets) -- these two readings disagree, and which
+    one the paper means can't be resolved from the text alone (likely a
+    two-column PDF extraction artifact). Rather than silently picking one,
+    this class requires the caller to say which -- see scripts/
+    run_calvin_stl_monitor.py's own sweep over both readings (and points
+    in between) to resolve this empirically instead."""
+
+    def __init__(self, obstacles, epsilon):
+        super().__init__(obstacles, w_bar=0.0, model_error=0.0, epsilon=epsilon)
 
 
 class ArmRepairShield(ArmSTLShield):

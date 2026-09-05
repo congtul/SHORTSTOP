@@ -316,6 +316,30 @@ def run_calvin_shielded_subtask(
     apples-to-apples comparison instead of a moving target that reacts to
     the shield's own decision.
 
+    Obstacle-aware shields (any shield with an `.obstacles` attribute --
+    ArmSTLMonitorShield/ArmRepairShield, unlike the obstacle-blind
+    ArmConfThreshShield) have that attribute overwritten with the newly
+    placed obstacle *before* `select()` is called for this subtask's
+    first decision -- otherwise their very first certification would run
+    against a stale obstacle from the previous subtask (or none at all).
+    `hasattr(shield, "obstacles")` is a no-op for shields without that
+    attribute, so this doesn't change ArmConfThreshShield's behavior.
+
+    Filter freq decoupled from policy freq for shields that support it:
+    Propose (K diffusion samples, expensive) still only runs every
+    `replan_steps` env-steps, but after EVERY executed row this harness
+    also calls `shield.recertify(real_joint_angles, remaining_chunk)` (if
+    the shield defines it -- ArmSTLMonitorShield/ArmRepairShield via
+    ArmReachOnlyShield.recertify, not ArmConfThreshShield) to re-check the
+    already-committed chunk's remaining tail against the REAL state just
+    reached, not the nominal one assumed when it was selected. If that
+    fails, the rest of the chunk is abandoned immediately and the outer
+    loop re-proposes right away, instead of waiting up to `replan_steps`
+    steps to notice real-world drift a shield could have caught sooner
+    for free (no extra K-sample cost). `hasattr(shield, "recertify")` is a
+    no-op for shields without it, so ArmConfThreshShield keeps executing
+    the full `replan_steps` window uninterrupted, exactly as before.
+
     Gripper-fallback fix: `shield.select()`'s fallback action is
     `np.zeros_like(candidates[0])`, meant as "freeze in place" -- but
     `HulcWrapper.step()` (mdt/wrappers/hulc_wrapper.py) binarizes the
@@ -358,6 +382,19 @@ def run_calvin_shielded_subtask(
         joint_angles = _joint_angles_from_obs(obs)
         candidates = policy.propose({**obs, "goal": goal})
         current_info = env.get_info()
+
+        # Obstacle must be known to the shield BEFORE select() runs, not
+        # after -- an obstacle-aware shield (ArmSTLMonitorShield/
+        # ArmRepairShield) needs it for its very first decision of this
+        # subtask too. Still derived from candidates[0] (the same
+        # already-sampled candidates), so this costs no extra propose()
+        # call and doesn't desync seeding vs the unshielded harness.
+        if first_chunk and obstacle_fn is not None:
+            obstacle = obstacle_fn(joint_angles, candidates[0])
+        first_chunk = False
+        if hasattr(shield, "obstacles") and obstacle is not None:
+            shield.obstacles = [obstacle]
+
         scores = calvin_progress_scores(task_oracle, subtask, current_info, joint_angles, candidates, replan_steps)
         chunk, shield_info = shield.select(joint_angles, candidates, scores)
         n_decisions += 1
@@ -366,11 +403,7 @@ def run_calvin_shielded_subtask(
         if shield_info["fallback"]:
             chunk[:, 6] = _gripper_action_from_obs(obs)
 
-        if first_chunk and obstacle_fn is not None:
-            obstacle = obstacle_fn(joint_angles, candidates[0])
-        first_chunk = False
-
-        for action_row in chunk[:replan_steps]:
+        for row_idx, action_row in enumerate(chunk[:replan_steps]):
             obs, _, _, current_info = env.step(_to_action_tensor(action_row))
             steps_taken += 1
 
@@ -395,6 +428,24 @@ def run_calvin_shielded_subtask(
 
             if steps_taken >= ep_len:
                 break
+
+            # Decouple filter freq from policy freq (docs/PARAMETERS_
+            # REFERENCE.md's "tach tan suat filter khoi policy" entry):
+            # for shields whose Certify step doesn't need a fresh
+            # K-candidate sample (any shield with a `recertify` method --
+            # ArmSTLMonitorShield/ArmRepairShield, not ArmConfThreshShield),
+            # re-check the chunk's remaining tail against the REAL state
+            # we just landed in, every real env-step -- not just at the
+            # next `replan_steps` boundary. If the real (possibly-drifted)
+            # trajectory no longer certifies, abandon the rest of this
+            # chunk and re-propose immediately instead of blindly
+            # executing rows that were only ever certified from the
+            # nominal state assumed at the last decision.
+            remaining_chunk = chunk[row_idx + 1:replan_steps]
+            if hasattr(shield, "recertify") and len(remaining_chunk) > 0:
+                real_joint_angles = _joint_angles_from_obs(obs)
+                if not shield.recertify(real_joint_angles, remaining_chunk):
+                    break
 
         if violated or reached:
             break

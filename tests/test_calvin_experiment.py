@@ -9,7 +9,7 @@ import functools
 import numpy as np
 import torch
 
-from shortstop.arm_shield import ArmConfThreshShield
+from shortstop.arm_shield import ArmConfThreshShield, ArmSTLMonitorShield
 from shortstop.arm_reach import propagate_arm_tube
 from shortstop.calvin_experiment import (
     run_calvin_shielded_subtask,
@@ -226,6 +226,41 @@ def test_shielded_subtask_executes_the_shields_higher_scoring_admissible_candida
     assert env.joint_angles[0] > 0  # executed the +delta candidate (higher g(a), closer to target)
 
 
+def test_shielded_subtask_wires_the_obstacle_into_an_obstacle_aware_shield_before_its_first_decision():
+    """Regression test for the obstacle-then-select reordering fix: an
+    obstacle-aware shield (has a `.obstacles` attribute, e.g.
+    ArmSTLMonitorShield) must have it set to the ACTUALLY placed obstacle
+    before its very first select() call of a subtask -- not left over
+    from whatever it was constructed with. Checked by constructing the
+    shield with a far-away placeholder obstacle, then placing the real
+    obstacle exactly on one candidate's own predicted endpoint (mirroring
+    sample_obstacle_from_reference_chunk's real behavior) -- if the
+    reordering fix works, that candidate is rejected on the very first
+    decision; if the shield were still certifying against the stale
+    far-away placeholder, it would wrongly pass as admissible."""
+    env = FakeEnv()
+    env.reset()
+
+    candidate = _joint0_chunk(0.1)
+    other = _joint0_chunk(-0.3)  # far enough opposite that it clears the flange's own inflation radius
+    policy = FakeMultiCandidatePolicy([candidate, other])
+    task_oracle = FakeTaskOracleWithTasks(success_after_steps=10**9, tasks={})
+
+    far_away = Obstacle(center=np.array([100.0, 100.0, 100.0]), radius=0.02)
+    shield = ArmSTLMonitorShield(obstacles=[far_away], epsilon=0.0)
+
+    def obstacle_fn(joint_angles, chunk):
+        return Obstacle(center=_predicted_endpoint(joint_angles, chunk), radius=0.05)
+
+    result = run_calvin_shielded_subtask(
+        env, policy, task_oracle, FakeLangEmbeddings(), SUBTASK, VAL_ANNOTATIONS, shield,
+        ep_len=10, replan_steps=10, obstacle_fn=obstacle_fn,
+    )
+
+    assert result["n_activated"] == 1  # candidate (candidates[0]) got rejected
+    assert env.joint_angles[0] < 0  # executed `other` instead
+
+
 def test_shielded_subtask_fallback_holds_the_gripper_instead_of_forcing_it_closed():
     """Regression test: shield.select()'s fallback action is
     np.zeros_like(candidates[0]) -- the harness must overwrite its gripper
@@ -250,3 +285,63 @@ def test_shielded_subtask_fallback_holds_the_gripper_instead_of_forcing_it_close
     assert result["n_activated"] == 1
     assert np.isclose(env.last_gripper_action, 0.42)  # held (float32 roundtrip), not forced to 0/-1
     assert env.joint_angles[0] == 0.0  # froze in place -- fallback's position columns are 0
+
+
+class FakeRecertifyShield:
+    """Test double isolating the harness's per-step recertify WIRING
+    (does it call recertify() after every executed row and abandon the
+    rest of the chunk on failure) from shield MATH correctness (already
+    covered by tests/test_arm_shield.py's ArmSTLMonitorShield/recertify
+    tests). select() always executes candidates[0] with everything
+    admissible. recertify() returns False exactly once, on its `fail_at`-th
+    call (0-indexed) -- True on every other call."""
+
+    def __init__(self, fail_at):
+        self.fail_at = fail_at
+        self.n_recertify_calls = 0
+
+    def select(self, joint_angles, candidates, scores):
+        del joint_angles, scores
+        mask = [True] * len(candidates)
+        return candidates[0], {"fallback": False, "n_admissible": len(candidates), "admissible_mask": mask}
+
+    def recertify(self, joint_angles, remaining_chunk):
+        del joint_angles, remaining_chunk
+        call_idx = self.n_recertify_calls
+        self.n_recertify_calls += 1
+        return call_idx != self.fail_at
+
+
+def test_shielded_subtask_recertifies_every_step_and_reproposes_early_on_failure():
+    """Regression test for decoupling filter freq from policy freq
+    (docs/PARAMETERS_REFERENCE.md's "tach tan suat filter khoi policy"
+    entry): a shield with a `recertify` method must have it called after
+    EVERY executed row of the currently-committed chunk, not only at the
+    next `replan_steps` boundary -- and a single failure must abandon the
+    rest of that chunk immediately (re-propose right away) instead of
+    blindly finishing all `replan_steps` rows.
+
+    FakePolicy always proposes the identical 10-row, delta=0.1 chunk
+    regardless of observation, so re-proposing produces indistinguishable
+    per-row motion -- what a working recertify wiring changes is *when*
+    propose()/select() get called again. `fail_at=3` rejects the tail
+    right after the 4th executed row (row_idx 0,1,2 pass; row_idx 3
+    fails), forcing a second decision; with `ep_len=replan_steps=10`, that
+    second decision's remaining 6 rows all pass recertify (call indices
+    4..8, none equal to 3), so the harness makes exactly 2 decisions
+    total, not 1 -- without the wiring, ep_len==replan_steps means a
+    single decision would always finish the whole episode.
+    """
+    env = FakeEnv()
+    env.reset()
+    policy = FakePolicy(delta=0.1, horizon=10)
+    task_oracle = FakeTaskOracleWithTasks(success_after_steps=10**9, tasks={})
+    shield = FakeRecertifyShield(fail_at=3)
+
+    result = run_calvin_shielded_subtask(
+        env, policy, task_oracle, FakeLangEmbeddings(), SUBTASK, VAL_ANNOTATIONS, shield,
+        ep_len=10, replan_steps=10, obstacle_fn=None,
+    )
+
+    assert result["n_decisions"] == 2
+    assert np.isclose(env.joint_angles[0], 0.1 * 10)  # all 10 rows still executed, just across 2 decisions

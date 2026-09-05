@@ -8,7 +8,7 @@ since CALVIN shares LIBERO's 7D relative-chunk convention and Panda robot
 import numpy as np
 
 from shortstop.arm_reach import propagate_arm_tube
-from shortstop.arm_shield import ArmConfThreshShield, ArmRepairShield
+from shortstop.arm_shield import ArmConfThreshShield, ArmRepairShield, ArmSTLMonitorShield
 from shortstop.env import Obstacle
 from shortstop.mdt_policy_client import MockMDTPolicyClient
 from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS
@@ -60,3 +60,26 @@ def test_full_propose_select_loop_with_conf_thresh_shield_on_synthetic_candidate
     assert len(info["admissible_mask"]) == len(candidates)
     assert len(info["disagreement"]) == len(candidates)
     assert not info["fallback"]  # threshold generous enough that at least one candidate is admissible
+
+
+def test_full_propose_select_loop_with_stl_monitor_shield_on_synthetic_candidates():
+    """STL-Monitor's own P-R-C-S variant: nominal STL robustness (no
+    reachtube, no repair) filter -> Select instead of Conf-Thresh's
+    disagreement filter or ShortStop's certified tube+repair (see
+    shortstop.arm_shield.ArmSTLMonitorShield)."""
+    rng = np.random.default_rng(0)
+    q = np.zeros(N_JOINTS)
+    policy = MockMDTPolicyClient(horizon=10, action_dim=7, n_candidates=8, noise_std=0.05, rng=rng)
+
+    candidates = policy.propose(observation={})  # Propose
+    assert len(candidates) == 8
+
+    # obstacle far from every candidate's path -- exercises wiring, not exact filtering
+    obstacle = Obstacle(center=np.array([10.0, 10.0, 10.0]), radius=0.05)
+    shield = ArmSTLMonitorShield(obstacles=[obstacle], epsilon=0.0)
+    scores = list(range(len(candidates)))
+    action, info = shield.select(q, candidates, scores)  # nominal-STL-filter -> Select
+
+    assert action.shape == (10, 7)
+    assert len(info["admissible_mask"]) == len(candidates)
+    assert not info["fallback"]  # obstacle far away -> every candidate admissible
