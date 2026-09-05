@@ -54,12 +54,53 @@ region (a true sphere/capsule, not a cube or its bounding box) -- the only
 remaining approximation is the Jacobian-linearization source documented
 above (a real, different, and still-open issue), not the geometry's own
 shape.
+
+RESOLVED (2026-09-05, a real, previously-undiscovered scale-mismatch bug,
+found via scripts/calibrate_arm_model_error.py's first real run --
+residuals averaging 0.32m, p99=0.74m, absurd for a single real step):
+`_step_joint_config` used to treat `task_space_delta_pos` (a raw task
+chunk's position columns, exactly as CALVIN's own policy/harness produces
+them) as already being a real Cartesian delta in meters. It is NOT, for
+CALVIN -- confirmed from the real source (`mdt_policy/calvin_env/
+calvin_env/robot/robot.py::Robot.relative_to_absolute`): the real env
+scales a raw action's position columns by `max_rel_pos` (0.02, the
+constructor default -- confirmed NOT overridden by `mdt_policy/calvin_env/
+conf/robot/panda.yaml`, which only sets `magic_scaling_factor_pos: 1`)
+before applying it. Every caller in this module was therefore predicting
+the arm moves roughly 1/0.02 = 50x farther per step than it actually does
+-- exactly the residual magnitude measured. Fixed via `CALVIN_ACTION_SCALE`
+below, applied inside `_step_joint_config` (the one place every other
+function in this module -- `propagate_arm_tube`, `nominal_joint_trajectory`,
+`step_prediction_residual` -- funnels through).
+
+CAVEAT this fix introduces: `CALVIN_ACTION_SCALE` is CALVIN-specific (this
+module's own original docstring above describes a *generic*, benchmark-
+agnostic design shared with a future LIBERO/pi0.5 integration -- see
+docs/LIBERO_SETUP.md's I/O contract). Baking a CALVIN-only constant in
+here trades that generality for a single, non-scattered fix location (a
+deliberate choice, not an oversight -- the alternative was threading an
+`action_scale` parameter through every call site across calvin_obstacle.py/
+calvin_progress.py/arm_shield.py/calvin_experiment.py, judged more error-
+prone to miss a spot than centralizing it here). Before ever wiring
+LIBERO/pi0.5 into this same module, VERIFY whether pi0.5's own served
+action already IS a real Cartesian delta (no analogous scaling step) --
+if so, this constant must become a real parameter (defaulting differently
+per benchmark), not silently reused as-is.
 """
 import numpy as np
 
 from .robot_geometry import (
     FRAME_RADIUS, LINK_RADIUS, closest_point_on_segment, end_effector_jacobian, panda_frames,
 )
+
+# CALVIN's own raw-action -> real-Cartesian-delta scale (see the module
+# docstring's "RESOLVED (2026-09-05, a real ... scale-mismatch bug)" entry
+# for the full derivation) -- confirmed from `mdt_policy/calvin_env/
+# calvin_env/robot/robot.py::Robot.__init__`'s own `max_rel_pos=0.02`
+# constructor default, times `magic_scaling_factor_pos` (confirmed = 1,
+# `mdt_policy/calvin_env/conf/robot/panda.yaml`, not overridden anywhere
+# else in this repo's own config/patch).
+CALVIN_ACTION_SCALE = 0.02
 
 
 class Capsule:
@@ -97,7 +138,7 @@ def _signed_distance(capsule, obstacle):
 
 def _step_joint_config(joint_angles, task_space_delta_pos):
     J = end_effector_jacobian(joint_angles)
-    dq = np.linalg.pinv(J) @ task_space_delta_pos
+    dq = np.linalg.pinv(J) @ (task_space_delta_pos * CALVIN_ACTION_SCALE)
     return joint_angles + dq
 
 

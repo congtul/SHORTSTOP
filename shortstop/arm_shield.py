@@ -30,7 +30,8 @@ import cvxpy as cp
 import numpy as np
 
 from .arm_reach import (
-    arm_find_counterexample, arm_robustness_to_go, nominal_joint_trajectory, propagate_arm_tube,
+    CALVIN_ACTION_SCALE, arm_find_counterexample, arm_robustness_to_go, nominal_joint_trajectory,
+    propagate_arm_tube,
 )
 from .robot_geometry import (
     FLANGE_FRAME_INDEX, FRAME_RADIUS, JOINT_LIMITS, LINK_RADIUS, N_JOINTS,
@@ -192,6 +193,14 @@ class ArmRepairShield(ArmSTLShield):
         original = task_chunk.copy()
         chunk = task_chunk.copy()
         ce = counterexample
+        # self.step_size/self.trust_region are REAL Cartesian meters (the
+        # physically meaningful unit an obstacle margin/repair distance
+        # should be configured in, matching the constructor's own
+        # docstring) -- but chunk[:, :3] is a RAW task-chunk value (see
+        # arm_reach.py's CALVIN_ACTION_SCALE), so both must be converted
+        # to raw units before modifying the chunk directly.
+        step_size_raw = self.step_size / CALVIN_ACTION_SCALE
+        trust_region_raw = self.trust_region / CALVIN_ACTION_SCALE
         for _ in range(self.max_repair_iters):
             k_star = ce["step"]
             direction = self._repair_direction(ce)
@@ -200,11 +209,11 @@ class ArmRepairShield(ArmSTLShield):
             # direction (task-space position columns only, see
             # propagate_arm_tube's docstring on why rotation/gripper are
             # untouched by the Reach step).
-            chunk[:k_star, :3] = chunk[:k_star, :3] + self.step_size * direction
+            chunk[:k_star, :3] = chunk[:k_star, :3] + step_size_raw * direction
             delta = chunk - original
             norm = np.linalg.norm(delta)
-            if norm > self.trust_region:
-                chunk = original + delta * (self.trust_region / norm)
+            if norm > trust_region_raw:
+                chunk = original + delta * (trust_region_raw / norm)
 
             tube = propagate_arm_tube(joint_angles, chunk, self.w_bar, self.model_error)
             # A repaired chunk must still respect JOINT_LIMITS, not just
@@ -444,7 +453,14 @@ class ArmMPCFilterShield(ArmReachOnlyShield):
         delta_q_cumulative = []
         running = 0
         for j in range(horizon):
-            running = running + ee_pinv[j] @ delta_a[j]
+            # CALVIN_ACTION_SCALE: `delta_a[j]` is a raw task-chunk delta
+            # (same units as `_step_joint_config` scales internally, see
+            # arm_reach.py's own module docstring) -- this hand-rolled
+            # sensitivity chain doesn't call `_step_joint_config` itself,
+            # so it must apply the SAME scale explicitly or this QP
+            # silently assumes a ~1/CALVIN_ACTION_SCALE too-large effect
+            # per unit of raw action.
+            running = running + ee_pinv[j] @ (delta_a[j] * CALVIN_ACTION_SCALE)
             delta_q_cumulative.append(running)
 
         constraints = []

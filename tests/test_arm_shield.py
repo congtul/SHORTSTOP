@@ -1,6 +1,6 @@
 import numpy as np
 
-from shortstop.arm_reach import arm_robustness_to_go, nominal_joint_trajectory, propagate_arm_tube
+from shortstop.arm_reach import CALVIN_ACTION_SCALE, arm_robustness_to_go, nominal_joint_trajectory, propagate_arm_tube
 from shortstop.arm_shield import (
     ArmConfThreshShield, ArmMPCFilterShield, ArmReachOnlyShield, ArmRepairShield, ArmSTLMonitorShield,
     ArmSTLShield,
@@ -19,7 +19,12 @@ Q_HOME = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
 
 
 def _straight_chunk(dx, horizon=4):
-    step = np.array([dx, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    """`dx`: the REAL Cartesian meters this step should actually move (this
+    helper's own contract, preserved across the 2026-09-05 CALVIN_ACTION_
+    SCALE fix) -- divides by CALVIN_ACTION_SCALE to get the raw task-chunk
+    value _step_joint_config now expects, so every existing call site's
+    `dx=0.05` still means "5cm of real motion," not 5cm-times-50."""
+    step = np.array([dx / CALVIN_ACTION_SCALE, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     return np.tile(step, (horizon, 1))
 
 
@@ -116,7 +121,7 @@ def test_arm_mpc_filter_shield_enforces_joint_limits_even_with_no_obstacle():
     linearized) resulting trajectory."""
     q = Q_HOME
     horizon = 10
-    step = np.array([0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    step = np.array([0.1 / CALVIN_ACTION_SCALE, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     chunk = np.tile(step, (horizon, 1))
     assert not all(within_joint_limits(qk) for qk in nominal_joint_trajectory(q, chunk)[1:])
 
@@ -310,7 +315,9 @@ def test_recertify_matches_admissible_and_reacts_to_a_drifted_real_state():
     # recertify must accept it.
     drifted_joint_angles = Q_HOME.copy()
     for _ in range(2):
-        drifted_joint_angles = _step_joint_config(drifted_joint_angles, np.array([-0.15, 0.0, 0.0]))
+        drifted_joint_angles = _step_joint_config(
+            drifted_joint_angles, np.array([-0.15 / CALVIN_ACTION_SCALE, 0.0, 0.0]),
+        )
     assert shield.recertify(drifted_joint_angles, remaining) is True
 
     # ArmConfThreshShield has no cheap per-step re-check at all (see its
@@ -478,9 +485,13 @@ def test_arm_conf_thresh_shield_measures_disagreement_only_over_the_first_replan
     computed over the truncated prefix, not silently still the full chunk.
     """
     q = np.zeros(N_JOINTS)
-    a = np.array([[0.05, 0, 0, 0, 0, 0, 0]] * 4)
-    b = np.array([[0.05, 0, 0, 0, 0, 0, 0], [0.05, 0, 0, 0, 0, 0, 0],
-                  [-0.5, 0, 0, 0, 0, 0, 0], [-0.5, 0, 0, 0, 0, 0, 0]])
+    # Raw values divided by CALVIN_ACTION_SCALE (see _straight_chunk's own
+    # docstring above) so the REAL motion -- and thus this test's own
+    # disagreement/threshold reasoning below -- is unchanged by the
+    # 2026-09-05 scale fix.
+    a = np.array([[0.05 / CALVIN_ACTION_SCALE, 0, 0, 0, 0, 0, 0]] * 4)
+    b = np.array([[0.05 / CALVIN_ACTION_SCALE, 0, 0, 0, 0, 0, 0], [0.05 / CALVIN_ACTION_SCALE, 0, 0, 0, 0, 0, 0],
+                  [-0.5 / CALVIN_ACTION_SCALE, 0, 0, 0, 0, 0, 0], [-0.5 / CALVIN_ACTION_SCALE, 0, 0, 0, 0, 0, 0]])
     assert np.allclose(a[:2], b[:2])  # identical prefix by construction
     assert not np.allclose(_endpoint(q, a), _endpoint(q, b))  # but diverge by the full chunk's end
 

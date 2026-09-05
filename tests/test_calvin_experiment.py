@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 from shortstop.arm_shield import ArmConfThreshShield, ArmSTLMonitorShield
-from shortstop.arm_reach import propagate_arm_tube
+from shortstop.arm_reach import CALVIN_ACTION_SCALE, propagate_arm_tube
 from shortstop.calvin_experiment import (
     _base_transform_from_env,
     _clearance,
@@ -314,10 +314,15 @@ def test_shielded_subtask_wires_the_obstacle_into_an_obstacle_aware_shield_befor
     env.joint_angles = Q_HOME.copy()
 
     def _xyz_chunk(dx, dy, dz, horizon=10):
+        """dx/dy/dz: REAL Cartesian meters per step (divided by
+        CALVIN_ACTION_SCALE to get the raw task-chunk value _step_joint_
+        config now expects -- see arm_reach.py's own module docstring on
+        the 2026-09-05 scale fix), so this helper's real-world geometry
+        stays exactly what it was before that fix."""
         chunk = np.zeros((horizon, 7))
-        chunk[:, 0] = dx
-        chunk[:, 1] = dy
-        chunk[:, 2] = dz
+        chunk[:, 0] = dx / CALVIN_ACTION_SCALE
+        chunk[:, 1] = dy / CALVIN_ACTION_SCALE
+        chunk[:, 2] = dz / CALVIN_ACTION_SCALE
         return chunk
 
     candidate = _xyz_chunk(0.02, 0.0, 0.0)
@@ -360,10 +365,15 @@ def test_shielded_subtask_reports_latency_and_ground_truth_rejection_precision()
     env.joint_angles = Q_HOME.copy()
 
     def _xyz_chunk(dx, dy, dz, horizon=10):
+        """dx/dy/dz: REAL Cartesian meters per step (divided by
+        CALVIN_ACTION_SCALE to get the raw task-chunk value _step_joint_
+        config now expects -- see arm_reach.py's own module docstring on
+        the 2026-09-05 scale fix), so this helper's real-world geometry
+        stays exactly what it was before that fix."""
         chunk = np.zeros((horizon, 7))
-        chunk[:, 0] = dx
-        chunk[:, 1] = dy
-        chunk[:, 2] = dz
+        chunk[:, 0] = dx / CALVIN_ACTION_SCALE
+        chunk[:, 1] = dy / CALVIN_ACTION_SCALE
+        chunk[:, 2] = dz / CALVIN_ACTION_SCALE
         return chunk
 
     candidate = _xyz_chunk(0.02, 0.0, 0.0)
