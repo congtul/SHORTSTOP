@@ -26,10 +26,31 @@ Note: none of this has been run against a real LIBERO/pi0.5 session -- see
 shortstop/arm_reach.py's docstring for the approximations in the Reach step
 itself, and shortstop/robot_geometry.py's for the sphere-chain geometry.
 """
+import cvxpy as cp
 import numpy as np
 
-from .arm_reach import arm_find_counterexample, arm_robustness_to_go, nominal_joint_trajectory, propagate_arm_tube
-from .robot_geometry import FLANGE_FRAME_INDEX, within_joint_limits
+from .arm_reach import (
+    arm_find_counterexample, arm_robustness_to_go, nominal_joint_trajectory, propagate_arm_tube,
+)
+from .robot_geometry import (
+    FLANGE_FRAME_INDEX, FRAME_RADIUS, JOINT_LIMITS, LINK_RADIUS, N_JOINTS,
+    end_effector_jacobian, numerical_jacobian, panda_frames, within_joint_limits,
+)
+
+
+def _closest_point_t(point, a, b):
+    """Same clamped-projection math as robot_geometry.closest_point_on_
+    segment, but returning the scalar `t` in [0,1] instead of the point
+    itself -- ArmMPCFilterShield needs `t` separately, to blend the two
+    endpoint frames' own Jacobians by the same weight (a link's closest
+    point is an affine combination of its two endpoint frames, so its
+    Jacobian w.r.t. joint angles is the same affine combination of theirs
+    -- no separate finite-difference pass needed for link primitives)."""
+    ab = b - a
+    length_sq = float(ab @ ab)
+    if length_sq < 1e-12:
+        return 0.0
+    return float(np.clip((point - a) @ ab / length_sq, 0.0, 1.0))
 
 
 class ArmReachOnlyShield:
@@ -218,6 +239,171 @@ class ArmRepairShield(ArmSTLShield):
             "fallback": False, "n_admissible": len(admissible_idx), "admissible_mask": mask,
             "repair_attempted": repair_attempted, "repair_succeeded": repair_succeeded,
         }
+
+
+class ArmMPCFilterShield(ArmReachOnlyShield):
+    """CALVIN/arm analogue of shortstop.baselines.MPCFilterShield -- an
+    H-step predictive safety filter (Wabersich & Zeilinger, "A predictive
+    safety filter for learning-based control of constrained nonlinear
+    dynamical systems," Automatica 2021, paper's ref [33]). Unlike every
+    other shield in this module, this does not pick among K candidates --
+    it takes the policy's OWN top candidate (`candidates[0]`) and solves a
+    QP that corrects it minimally to satisfy every obstacle/joint-limit
+    constraint over the whole chunk, exactly mirroring
+    `baselines.MPCFilterShield`'s own scope (that class's docstring
+    explains why an earlier *1-step*-lookahead version was found
+    materially weaker than a real predictive safety filter -- this reuses
+    its CURRENT, full-H-step design, not the discarded one).
+
+    Why this needs its own linearization scheme (2D's is exact, this
+    isn't): 2D's dynamics `x_next = x + a*dt` is EXACTLY linear in the
+    action, so a single QP with hyperplane constraints is not an
+    approximation of the dynamics itself, only of the (non-convex) circle
+    constraint. The arm's task-space-action -> joint-space -> Cartesian
+    chain (arm_reach.py's Jacobian pseudo-inverse stepping) is genuinely
+    nonlinear -- so this ALSO linearizes the dynamics, once, around the
+    policy's own nominal chunk (a discrete-time linear time-varying
+    system), then solves one QP for the whole H-step chunk:
+
+      1. `q_nominal = nominal_joint_trajectory(joint_angles, nominal_chunk)`
+         -- the UNCORRECTED trajectory the policy's own chunk would
+         produce (arm_reach.py, same Jacobian-pinv stepping
+         propagate_arm_tube uses internally).
+      2. Per step k=1..H, the sensitivity of that step's joint delta to a
+         perturbation of THAT step's action is `pinv(J_ee(q_nominal[k-1]))`
+         -- the same flange Jacobian `_step_joint_config` itself uses,
+         evaluated at (and frozen at) the nominal trajectory's own
+         joint config for that step -- a single linearization pass, not
+         re-linearized after solving (same documented limitation
+         `baselines.MPCFilterShield` already carries for its own
+         tangent-plane hyperplanes).
+      3. Cumulative joint-delta at step k is the sum of every prior step's
+         contribution (a linear/affine cvxpy expression in the decision
+         variable `a`, since each step's own contribution is linear).
+      4. Every one of the 9 frames' AND 8 links' positions at step k is
+         linearized the same way: `nominal_position + frame_jacobian(
+         q_nominal[k]) @ cumulative_delta_q_k` (`numerical_jacobian`,
+         finite-difference w.r.t. joint angles, frozen at the nominal
+         trajectory). A link's own closest point to an obstacle is an
+         affine blend of its two endpoint frames (`_closest_point_t`'s
+         `t`), so its Jacobian is the same blend of theirs -- no extra
+         finite-difference pass needed for links. Constrains the FULL
+         17-primitive chain (9 frames + 8 links), matching ShortStop's own
+         reachtube scope exactly -- a coarser (e.g. flange-only) version
+         would look artificially safer than ShortStop here for the wrong
+         reason (missing the same mid-link collisions Category A.3 fixed
+         for ShortStop's own reachtube), not because MPC-Filter is
+         actually a better filter.
+      5. Each primitive-vs-obstacle constraint is a tangent-plane
+         hyperplane at the NOMINAL closest point (same construction as
+         `baselines.MPCFilterShield`'s circle hyperplane), tightened by
+         that primitive's own physical radius (FRAME_RADIUS/LINK_RADIUS)
+         plus `w_bar + model_error` -- the same total inflation
+         `arm_reach._signed_distance` uses.
+      6. JOINT_LIMITS added as direct linear constraints on the same
+         cumulative joint-delta expression -- the arm's analogue of 2D's
+         `max_action_norm` bound (a physical-validity constraint every
+         other arm shield already enforces, so MPC-Filter isn't unfairly
+         advantaged by being allowed to violate it).
+
+    No soundness proof, same caveat `baselines.MPCFilterShield`'s own
+    docstring states: valid only at the ONE linearization point (the
+    policy's own nominal chunk), not iteratively re-verified (a real
+    iterative PSF would re-linearize and re-solve, SQP-style, until
+    convergence) -- documented as a real limitation, not silently
+    presented as certified the way ShortStop's own exact capsule-vs-sphere
+    reachtube is.
+
+    Inherits `_admissible`/`_trajectory_within_joint_limits`/`recertify`
+    from ArmReachOnlyShield unchanged: recertify's job (re-check an
+    ALREADY-SELECTED chunk's remaining tail against real drift) is a
+    binary robustness>=0 + joint-limit check, identical in spirit whether
+    the chunk came from best-of-K selection or QP correction -- no new
+    logic needed, and this gets MPC-Filter the SAME filter/policy
+    frequency decoupling ArmReachOnlyShield's subclasses already have (see
+    docs/PARAMETERS_REFERENCE.md's "tach tan suat filter khoi policy"
+    table, which already lists MPC-Filter as one of the shields able to
+    do this).
+
+    `select()`'s returned info dict deliberately marks every OTHER
+    candidate (`candidates[1:]`) as trivially admissible regardless of
+    whether they were ever evaluated -- MPC-Filter never looks at them at
+    all (matches `baselines.MPCFilterShield`'s own `[not intervened] +
+    [True] * (K - 1)` convention exactly, for metric-computation
+    consistency between the 2D and arm versions of this baseline)."""
+
+    def select(self, joint_angles, candidates, scores):
+        del scores  # MPC-Filter corrects candidates[0] directly, never ranks -- see class docstring
+        joint_angles = np.asarray(joint_angles, dtype=float)
+        nominal_chunk = np.asarray(candidates[0], dtype=float).copy()
+        horizon = len(nominal_chunk)
+
+        q_nominal = nominal_joint_trajectory(joint_angles, nominal_chunk)  # length horizon+1
+        ee_pinv = [np.linalg.pinv(end_effector_jacobian(q_nominal[k])) for k in range(horizon)]
+        frames_nominal = [panda_frames(q) for q in q_nominal]  # length horizon+1, each (9,3)
+
+        a = cp.Variable((horizon, 3))
+        delta_a = a - nominal_chunk[:, :3]
+        delta_q_cumulative = []
+        running = 0
+        for j in range(horizon):
+            running = running + ee_pinv[j] @ delta_a[j]
+            delta_q_cumulative.append(running)
+
+        constraints = []
+        for k in range(1, horizon + 1):
+            dq_k = delta_q_cumulative[k - 1]
+            constraints.append(q_nominal[k] + dq_k >= JOINT_LIMITS[:, 0])
+            constraints.append(q_nominal[k] + dq_k <= JOINT_LIMITS[:, 1])
+
+            frame_points = frames_nominal[k]
+            frame_jacobians = [numerical_jacobian(q_nominal[k], i) for i in range(len(frame_points))]
+
+            for obstacle in self.obstacles:
+                for i, nominal_point in enumerate(frame_points):
+                    self._add_tangent_constraint(
+                        constraints, nominal_point, frame_jacobians[i], dq_k, obstacle, FRAME_RADIUS[i],
+                    )
+                for i in range(len(LINK_RADIUS)):
+                    a_pt, b_pt = frame_points[i], frame_points[i + 1]
+                    t = _closest_point_t(obstacle.center, a_pt, b_pt)
+                    link_point = a_pt + t * (b_pt - a_pt)
+                    link_jacobian = (1.0 - t) * frame_jacobians[i] + t * frame_jacobians[i + 1]
+                    self._add_tangent_constraint(
+                        constraints, link_point, link_jacobian, dq_k, obstacle, LINK_RADIUS[i],
+                    )
+
+        problem = cp.Problem(cp.Minimize(cp.sum_squares(delta_a)), constraints)
+        try:
+            problem.solve()
+        except cp.error.SolverError:
+            a.value = None
+
+        if a.value is None:
+            mask = [False] + [True] * (len(candidates) - 1)
+            return np.zeros_like(nominal_chunk), {
+                "fallback": True, "n_admissible": 0, "admissible_mask": mask,
+                "repair_attempted": True, "repair_succeeded": False,
+            }
+
+        corrected_position = np.asarray(a.value)
+        chunk = nominal_chunk.copy()
+        chunk[:, :3] = corrected_position
+        intervened = not np.allclose(corrected_position, nominal_chunk[:, :3], atol=1e-6)
+        mask = [not intervened] + [True] * (len(candidates) - 1)
+        n_admissible = len(candidates) - (1 if intervened else 0)
+        return chunk, {
+            "fallback": False, "n_admissible": n_admissible, "admissible_mask": mask,
+            "intervened": intervened, "repair_attempted": intervened, "repair_succeeded": intervened,
+        }
+
+    def _add_tangent_constraint(self, constraints, nominal_point, jacobian, dq_k, obstacle, physical_radius):
+        direction = nominal_point - obstacle.center
+        norm = np.linalg.norm(direction)
+        n = direction / norm if norm > 1e-9 else np.array([0.0, 0.0, 1.0])
+        radius = obstacle.radius + physical_radius + self.w_bar + self.model_error
+        corrected_point = nominal_point + jacobian @ dq_k
+        constraints.append(n @ (corrected_point - obstacle.center) >= radius)
 
 
 class ArmConfThreshShield:

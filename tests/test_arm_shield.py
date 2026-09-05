@@ -1,11 +1,12 @@
 import numpy as np
 
-from shortstop.arm_reach import propagate_arm_tube
+from shortstop.arm_reach import arm_robustness_to_go, nominal_joint_trajectory, propagate_arm_tube
 from shortstop.arm_shield import (
-    ArmConfThreshShield, ArmReachOnlyShield, ArmRepairShield, ArmSTLMonitorShield, ArmSTLShield,
+    ArmConfThreshShield, ArmMPCFilterShield, ArmReachOnlyShield, ArmRepairShield, ArmSTLMonitorShield,
+    ArmSTLShield,
 )
 from shortstop.env import Obstacle
-from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS
+from shortstop.robot_geometry import FLANGE_FRAME_INDEX, N_JOINTS, within_joint_limits
 
 # A real, well-within-JOINT_LIMITS Franka "ready" pose -- NOT np.zeros:
 # joint 4 (index 3)'s own real range is entirely negative ([-3.0718,
@@ -68,6 +69,82 @@ def test_arm_stl_monitor_shield_rejects_a_chunk_that_hits_an_obstacle():
 
     assert info["admissible_mask"] == [False, True]
     assert np.allclose(action, safe)
+
+
+def test_arm_mpc_filter_shield_leaves_the_chunk_unchanged_when_no_obstacle_is_near():
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    far_obstacle = Obstacle(center=np.array([100.0, 100.0, 100.0]), radius=0.02)
+
+    shield = ArmMPCFilterShield(obstacles=[far_obstacle], w_bar=0.0, model_error=0.0)
+    action, info = shield.select(q, [chunk], scores=[1.0])
+
+    assert info["fallback"] is False
+    assert info["intervened"] is False
+    assert info["admissible_mask"] == [True]
+    assert np.allclose(action[:, :3], chunk[:, :3], atol=1e-6)
+
+
+def test_arm_mpc_filter_shield_corrects_a_chunk_that_hits_an_obstacle():
+    """Regression test for the QP's own linearization: the corrected chunk
+    must be genuinely admissible under the TRUE (nonlinear) reachtube, not
+    just the linearized model the QP itself solved against -- confirmed
+    directly via propagate_arm_tube/arm_robustness_to_go on the CORRECTED
+    chunk, exactly the same ground-truth check every other shield's
+    admissibility is judged by."""
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+
+    shield = ArmMPCFilterShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0)
+    action, info = shield.select(q, [chunk], scores=[1.0])
+
+    assert info["fallback"] is False
+    assert info["intervened"] is True
+    assert not np.allclose(action[:, :3], chunk[:, :3], atol=1e-6)
+
+    corrected_tube = propagate_arm_tube(q, action, w_bar=0.0, model_error=0.0)
+    assert arm_robustness_to_go(corrected_tube, [obstacle]) >= 0.0
+
+
+def test_arm_mpc_filter_shield_enforces_joint_limits_even_with_no_obstacle():
+    """A chunk that would drive a joint past JOINT_LIMITS over the horizon
+    (no obstacle involved at all) must still get pulled back within range
+    -- the arm's analogue of 2D's max_action_norm bound, checked directly
+    via nominal_joint_trajectory/within_joint_limits on the TRUE (not
+    linearized) resulting trajectory."""
+    q = Q_HOME
+    horizon = 10
+    step = np.array([0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    chunk = np.tile(step, (horizon, 1))
+    assert not all(within_joint_limits(qk) for qk in nominal_joint_trajectory(q, chunk)[1:])
+
+    shield = ArmMPCFilterShield(obstacles=[], w_bar=0.0, model_error=0.0)
+    action, info = shield.select(q, [chunk], scores=[1.0])
+
+    assert info["fallback"] is False
+    assert info["intervened"] is True
+    corrected_trajectory = nominal_joint_trajectory(q, action)
+    assert all(within_joint_limits(qk) for qk in corrected_trajectory[1:])
+
+
+def test_arm_mpc_filter_shield_falls_back_when_the_qp_is_infeasible():
+    """An absurdly large obstacle radius (5m) centered on the chunk's own
+    nominal endpoint can't be cleared by any correction within reach --
+    the QP must report infeasible, not silently return a wrong/partial
+    solution."""
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=5.0)
+
+    shield = ArmMPCFilterShield(obstacles=[obstacle], w_bar=0.0, model_error=0.0)
+    action, info = shield.select(q, [chunk], scores=[1.0])
+
+    assert info["fallback"] is True
+    assert info["admissible_mask"] == [False]
+    assert np.allclose(action, np.zeros_like(chunk))
 
 
 def test_arm_stl_monitor_shield_picks_highest_score_among_admissible():
