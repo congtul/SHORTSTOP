@@ -156,6 +156,17 @@ class ArmRepairShield(ArmSTLShield):
     here. max_repair_iters=1 matches Algorithm 1 (one gradient step, one
     re-certification, no retry); see shortstop.shield.RepairShield's
     docstring for why >1 is a CEGIS-style extension beyond the paper.
+
+    Defines its own `resolve(joint_angles, remaining_chunk)` (2026-09-05,
+    same reasoning as ArmMPCFilterShield's own `resolve` -- see its
+    docstring): this shield already HAS a real correction mechanism
+    (`_repair`), so relying on the inherited `ArmReachOnlyShield.recertify`
+    (a pure pass/fail check) at per-step drift time would waste exactly
+    the capability that distinguishes ShortStop from STL-Monitor --
+    detecting real-world drift only to give up and re-propose, instead of
+    trying to repair around it first. `run_calvin_shielded_subtask`
+    prefers `resolve` over `recertify` whenever a shield defines both (see
+    that harness's own docstring), so this takes effect automatically.
     """
 
     def __init__(
@@ -239,6 +250,24 @@ class ArmRepairShield(ArmSTLShield):
             "fallback": False, "n_admissible": len(admissible_idx), "admissible_mask": mask,
             "repair_attempted": repair_attempted, "repair_succeeded": repair_succeeded,
         }
+
+    def resolve(self, joint_angles, remaining_chunk):
+        """Re-attempts REPAIR from the REAL current state every real
+        env-step, not just a binary pass/fail -- see class docstring for
+        why. Mirrors select()'s own per-candidate logic (already
+        admissible -> keep as-is; not admissible -> counterexample-guided
+        repair -> success or give up), applied to the real current
+        state's remaining tail instead of one of K nominal candidates.
+        Returns the (possibly repaired) `remaining_chunk`, or `None` if
+        repair fails -- the harness treats `None` exactly like
+        `recertify()` returning `False` (abandon, re-propose)."""
+        joint_limits_ok = self._trajectory_within_joint_limits(joint_angles, remaining_chunk)
+        tube = propagate_arm_tube(joint_angles, remaining_chunk, self.w_bar, self.model_error)
+        if joint_limits_ok and arm_robustness_to_go(tube, self.obstacles) >= self.epsilon:
+            return remaining_chunk
+        ce = arm_find_counterexample(tube, self.obstacles)
+        fixed_chunk, success = self._repair(joint_angles, remaining_chunk, ce)
+        return fixed_chunk if success else None
 
 
 class ArmMPCFilterShield(ArmReachOnlyShield):

@@ -361,6 +361,63 @@ def test_arm_repair_shield_falls_back_when_repair_cannot_fix_it_in_time():
     assert np.allclose(action, np.zeros_like(chunk))
 
 
+def test_arm_repair_shield_resolve_is_a_noop_when_no_obstacle_is_near():
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    far_obstacle = Obstacle(center=np.array([100.0, 100.0, 100.0]), radius=0.02)
+    shield = ArmRepairShield(
+        obstacles=[far_obstacle], w_bar=0.0, model_error=0.0, epsilon=0.02,
+        trust_region=0.3, step_size=0.1, max_repair_iters=3,
+    )
+
+    resolved = shield.resolve(q, chunk)
+
+    assert np.allclose(resolved, chunk)
+
+
+def test_arm_repair_shield_resolve_repairs_from_the_real_current_state():
+    """Regression test for ArmRepairShield's own resolve() (2026-09-05):
+    unlike the inherited binary recertify(), resolve() must actually
+    RE-ATTEMPT repair (reusing _repair(), the same mechanism select()
+    uses) on the real current state's remaining tail -- not just report
+    whether it's still admissible. Same working repair parameters as
+    test_arm_repair_shield_fixes_a_rejected_candidate_and_still_certifies_it
+    (trust_region=0.3/step_size=0.1/max_repair_iters=3 -- verified
+    directly this converges from Q_HOME)."""
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+    shield = ArmRepairShield(
+        obstacles=[obstacle], w_bar=0.0, model_error=0.0, epsilon=0.02,
+        trust_region=0.3, step_size=0.1, max_repair_iters=3,
+    )
+
+    resolved = shield.resolve(q, chunk)
+
+    assert resolved is not None
+    assert not np.allclose(resolved, chunk)  # actually got modified, not a no-op
+    corrected_tube = propagate_arm_tube(q, resolved, w_bar=0.0, model_error=0.0)
+    assert arm_robustness_to_go(corrected_tube, [obstacle]) >= shield.epsilon
+
+
+def test_arm_repair_shield_resolve_returns_none_when_repair_cannot_fix_it_in_time():
+    """Mirrors test_arm_repair_shield_falls_back_when_repair_cannot_fix_it_in_time's
+    exact tiny trust_region/step_size setup -- resolve() must report the
+    same failure (None), not silently return an unrepaired/still-unsafe
+    chunk."""
+    q = Q_HOME
+    chunk = _straight_chunk(0.05)
+    tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
+    obstacle = Obstacle(center=tube[-1][FLANGE_FRAME_INDEX].center(), radius=0.05)
+    shield = ArmRepairShield(
+        obstacles=[obstacle], w_bar=0.0, model_error=0.0, epsilon=0.02,
+        trust_region=1e-6, step_size=1e-6, max_repair_iters=1,
+    )
+
+    assert shield.resolve(q, chunk) is None
+
+
 def _endpoint(q, chunk):
     tube = propagate_arm_tube(q, chunk, w_bar=0.0, model_error=0.0)
     return tube[-1][FLANGE_FRAME_INDEX].center()

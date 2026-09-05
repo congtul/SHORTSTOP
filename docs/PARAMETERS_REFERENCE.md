@@ -108,7 +108,9 @@ Chạy sweep thật (n_sequences=100, tuning cohort) ở `REPLAN_STEPS=5` cho ba
 
 **Lưu ý đã đo được**: chain `select()` rồi `resolve()` (đúng như harness thật làm) là 2 lần linearize riêng biệt chồng lên nhau — verify bằng số thật cho 1 case cụ thể: robustness sau khi chain chỉ còn **-0.00068m** (âm nhẹ, dưới 1mm) thay vì ≥0 tuyệt đối — sai số cộng dồn nhỏ, THẬT nhưng không đáng kể, đã ghi nhận rõ trong docstring `ArmMPCFilterShield`, không che giấu.
 
-CBF-Shield/ShortStop chưa có cơ chế `resolve` riêng (mới chỉ `recertify` kế thừa) — nếu sau này muốn đúng "predictive" hơn cho CBF-Shield (QP 1 bước) thì áp dụng lại đúng pattern `resolve` này, không cần thiết kế lại từ đầu.
+**Nâng cấp tiếp, cùng ngày, cho ShortStop (`ArmRepairShield`)**: cùng lý do như MPC-Filter — shield này đã CÓ SẴN 1 cơ chế sửa thật (`_repair()`, gradient-step theo Eq. 4), nên chỉ dùng `recertify` (nhị phân, kế thừa) ở bước drift-check giữa chừng là lãng phí đúng khả năng làm nó khác STL-Monitor. `ArmRepairShield.resolve(joint_angles, remaining_chunk)` giờ tái dùng đúng logic per-candidate của `select()` (đã admissible thì giữ nguyên; không thì `arm_find_counterexample` + `_repair()`), áp cho state thật thay vì 1 trong K candidate nominal. Trả `None` nếu repair thất bại (giống `recertify` trả `False`). Test: `tests/test_arm_shield.py`'s 3 test `arm_repair_shield_resolve_*` mới (no-op, sửa thành công verify bằng FK thật, thất bại đúng tham số với `test_arm_repair_shield_falls_back_when_repair_cannot_fix_it_in_time`).
+
+CBF-Shield chưa có bản cho tay máy (`ArmCBFShield`) — nếu build sau này, cùng bản chất QP 1-bước như MPC-Filter, áp dụng lại đúng pattern `resolve` này, không cần thiết kế lại từ đầu.
 
 Chưa làm: `propose()` vẫn chạy đúng nhịp `replan_steps` cố định như trước (chưa rút ngắn nhịp Propose theo tỉ lệ Diffusion Policy nào cả) — thay đổi lần này CHỈ ở tần suất Certify/Filter, đúng phạm vi ý tưởng ở trên, không đụng tới câu hỏi `replan_steps` (nhịp Propose) đã chốt =10 ở mục trên.
 
