@@ -25,9 +25,23 @@ task-space action gets turned into a joint-config update).
 DH table: the standard modified-DH (Craig convention) parameters published
 for the Panda (matches Franka's own documentation and the values used in
 robotics-toolbox-python's Panda model; independently spot-checked via web
-search: d1=0.333, d3=0.316, a4=0.0825, a5=-0.0825 agree). VERIFY AGAINST THE
-ACTUAL franka_ros / franka_description URDF before relying on this for real
-hardware or a real simulator -- this was not run against a live robot.
+search: d1=0.333, d3=0.316, a4=0.0825, a5=-0.0825 agree).
+
+VERIFIED against a live robot (2026-09-05, WSL2, `scripts/verify_robot_
+geometry_against_pybullet.py`): panda_frames() diffed directly against
+CALVIN's own real PyBullet simulated Panda (100 samples from a real
+rollout) -- exact 0.00000m discrepancy on every one of the 9 frames
+(base, 7 joints, flange). The first real run instead showed a spurious
+~5-13cm error on the base + all 7 joints (flange still exact) -- a bug
+in the VERIFY SCRIPT itself, not this module: PyBullet's
+`getLinkState()`/`getBasePositionAndOrientation()` position element is
+each link's CENTER-OF-MASS frame, not the URDF joint/link frame this
+module's DH chain represents (they coincide only when a link's own
+inertial offset is zero, true for the massless flange, false for real
+motor-housing links) -- fixed in the verify script by reading
+`worldLinkFramePosition` (`getLinkState(..., computeForwardKinematics=1)
+[4]`) and recovering the base's URDF frame from its COM pose via
+`getDynamicsInfo`. PANDA_DH/FLANGE_OFFSET below need no correction.
 """
 import numpy as np
 

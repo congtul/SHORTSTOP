@@ -94,16 +94,23 @@ literature thật làm cho tay máy**. Đã tìm và trích dẫn cụ thể:
   cách closed-form, rẻ, real-time được — nhưng cho **nhiều điểm dọc cánh
   tay**, không phải 1 điểm.
 
-**Cập nhật 2026-09-05 -- đoạn dưới đây đã lỗi thời trên 2 điểm**: (1) API
-đã đổi -- không còn `SPHERE_RADII`/4-sphere, đã thay bằng `LINK_RADIUS`
-(8 giá trị) + `capsule_segments()` phủ **toàn bộ** 8 link, không phải 1
-subset 4 điểm; (2) claim "đã verify khớp URDF thật" cho DH table
-**không chính xác** -- cái đã làm chỉ là so tay vài hằng số DH (d/a) với
-`<origin>` của URDF, không phải so sánh FK/pose thật. Xem
-`docs/PARAMETERS_REFERENCE.md` mục 8 (đã sửa) và
-`scripts/verify_robot_geometry_against_pybullet.py` (verify thật, so
-`panda_frames()` trực tiếp với `p.getLinkState()` của sim CALVIN -- viết
-xong, chưa chạy, cần WSL2) cho hiện trạng đúng.
+**Cập nhật 2026-09-05 -- đoạn dưới đây đã lỗi thời trên 2 điểm, điểm 2 nay
+đã verify thật xong**: (1) API đã đổi -- không còn `SPHERE_RADII`/4-sphere,
+đã thay bằng `LINK_RADIUS` (8 giá trị) + `capsule_segments()` phủ
+**toàn bộ** 8 link, không phải 1 subset 4 điểm; (2) claim "đã verify khớp
+URDF thật" ở đoạn dưới lúc viết ra **không chính xác** (chỉ so tay vài
+hằng số DH d/a với `<origin>` của URDF, không phải so sánh FK/pose thật)
+-- **nay đã verify thật bằng `scripts/verify_robot_geometry_against_
+pybullet.py`** (so `panda_frames()` trực tiếp với PyBullet thật của
+CALVIN sim, sau khi sửa 1 bug riêng của chính script này -- pybullet's
+`getLinkState()[0]`/`getBasePositionAndOrientation()[0]` trả về khung
+center-of-mass, không phải khung joint/link URDF; fix: đọc
+`getLinkState(..., computeForwardKinematics=1)[4]` + phục hồi khung base
+qua `getDynamicsInfo`). **Kết quả chạy thật (WSL2, 2026-09-05, n=100
+sample từ rollout thật)**: sai lệch = 0.00000m (chính xác tuyệt đối, tới
+độ chính xác float) ở **cả 9 frame** (base, 7 joint, flange) -- `PANDA_DH`/
+`FLANGE_OFFSET` khớp hoàn hảo với FK thật của CALVIN's PyBullet, không
+cần chỉnh gì. Xem `docs/PARAMETERS_REFERENCE.md` mục 8 cho chi tiết.
 
 Implementation ở đây: forward-kinematics thật của Panda (`robot_geometry.py`,
 DH table modified-DH). Bán kính link (`LINK_RADIUS`, đo cho cả 8 link,
