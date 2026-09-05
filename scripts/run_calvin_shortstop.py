@@ -207,6 +207,22 @@ def main(cfg):
 
     eval_sequences, sequence_seed_base, cohort_offset, N = cohort_sequences(cfg, TUNING_MODE)
 
+    results_path = run_output_dir / "results.json"
+
+    def _write_progress(results):
+        # Re-written after EVERY sweep config, not just once at the end --
+        # see run_calvin_mpc_filter.py's identical helper for why.
+        write_results_json(results_path, {
+            "tuning_mode": TUNING_MODE,
+            "cohort_sequence_idx_range": [cohort_offset, cohort_offset + N],
+            "n_candidates": N_CANDIDATES,
+            "obstacle_radius": OBSTACLE_RADIUS,
+            "model_error": MODEL_ERROR,
+            "params_to_sweep": PARAMS_TO_SWEEP if TUNING_MODE else None,
+            "chosen_params": None if TUNING_MODE else CHOSEN_PARAMS,
+            "results": results,
+        })
+
     results = []
     configs = PARAMS_TO_SWEEP if TUNING_MODE else [CHOSEN_PARAMS]
     for params in configs:
@@ -224,18 +240,10 @@ def main(cfg):
             val_annotations, get_env_state_for_initial_condition, eval_sequences, cfg, sequence_seed_base,
         )
         results.append(entry)
+        _write_progress(results)
+        log(f"  [progress] wrote {len(results)}/{len(configs)} config(s) so far to: {results_path}")
 
-    write_results_json(run_output_dir / "results.json", {
-        "tuning_mode": TUNING_MODE,
-        "cohort_sequence_idx_range": [cohort_offset, cohort_offset + N],
-        "n_candidates": N_CANDIDATES,
-        "obstacle_radius": OBSTACLE_RADIUS,
-        "model_error": MODEL_ERROR,
-        "params_to_sweep": PARAMS_TO_SWEEP if TUNING_MODE else None,
-        "chosen_params": None if TUNING_MODE else CHOSEN_PARAMS,
-        "results": results,
-    })
-    log(f"[run] wrote structured results to: {run_output_dir / 'results.json'}")
+    log(f"[run] wrote structured results to: {results_path}")
     log(f"[run] DONE -- zip up {run_output_dir} and send it back for tuning analysis")
     log.file.close()
 

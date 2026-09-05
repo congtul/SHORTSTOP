@@ -190,6 +190,26 @@ def main(cfg):
     # obstacles=[] is a placeholder: run_calvin_shielded_subtask overwrites
     # shield.obstacles from candidates[0] before this shield's very first
     # decision of each subtask (see its own docstring) -- never read as [].
+    results_path = run_output_dir / "results.json"
+
+    def _write_progress(results):
+        # Re-written after EVERY sweep config, not just once at the end --
+        # a tuning sweep is slow enough (each config = a full cohort
+        # rollout) that losing everything to a crash/interrupt partway
+        # through, or having to wait for the whole sweep before seeing any
+        # number, is real pain. Cheap to redo: `results` only grows one
+        # entry at a time, and json.dump just overwrites the same file.
+        write_results_json(results_path, {
+            "tuning_mode": TUNING_MODE,
+            "cohort_sequence_idx_range": [cohort_offset, cohort_offset + N],
+            "n_candidates": N_CANDIDATES,
+            "obstacle_radius": OBSTACLE_RADIUS,
+            "wbar_model_error_to_sweep": WBAR_MODEL_ERROR_TO_SWEEP if TUNING_MODE else None,
+            "chosen_w_bar": None if TUNING_MODE else CHOSEN_W_BAR,
+            "chosen_model_error": None if TUNING_MODE else CHOSEN_MODEL_ERROR,
+            "results": results,
+        })
+
     results = []
     configs = WBAR_MODEL_ERROR_TO_SWEEP if TUNING_MODE else [{"w_bar": CHOSEN_W_BAR, "model_error": CHOSEN_MODEL_ERROR}]
     for config in configs:
@@ -201,18 +221,10 @@ def main(cfg):
             val_annotations, get_env_state_for_initial_condition, eval_sequences, cfg, sequence_seed_base,
         )
         results.append(entry)
+        _write_progress(results)
+        log(f"  [progress] wrote {len(results)}/{len(configs)} config(s) so far to: {results_path}")
 
-    write_results_json(run_output_dir / "results.json", {
-        "tuning_mode": TUNING_MODE,
-        "cohort_sequence_idx_range": [cohort_offset, cohort_offset + N],
-        "n_candidates": N_CANDIDATES,
-        "obstacle_radius": OBSTACLE_RADIUS,
-        "wbar_model_error_to_sweep": WBAR_MODEL_ERROR_TO_SWEEP if TUNING_MODE else None,
-        "chosen_w_bar": None if TUNING_MODE else CHOSEN_W_BAR,
-        "chosen_model_error": None if TUNING_MODE else CHOSEN_MODEL_ERROR,
-        "results": results,
-    })
-    log(f"[run] wrote structured results to: {run_output_dir / 'results.json'}")
+    log(f"[run] wrote structured results to: {results_path}")
     log(f"[run] DONE -- zip up {run_output_dir} and send it back for tuning analysis")
     log.file.close()
 

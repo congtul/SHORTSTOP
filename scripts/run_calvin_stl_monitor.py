@@ -433,6 +433,23 @@ def main(cfg):
     # obstacles=[] is a placeholder: run_calvin_shielded_subtask overwrites
     # shield.obstacles from candidates[0] before this shield's very first
     # decision of each subtask (see its own docstring) -- never read as [].
+    results_path = RUN_OUTPUT_DIR / "results.json"
+
+    def _write_progress(results):
+        # Re-written after EVERY sweep entry (diagnostic + each epsilon),
+        # not just once at the end -- see run_calvin_shielded.py's
+        # identical helper for why.
+        with open(results_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "tuning_mode": TUNING_MODE,
+                "cohort_sequence_idx_range": [COHORT_OFFSET, COHORT_OFFSET + N],
+                "n_candidates": N_CANDIDATES,
+                "obstacle_radius": OBSTACLE_RADIUS,
+                "epsilons_to_sweep": EPSILONS_TO_SWEEP if TUNING_MODE else None,
+                "chosen_epsilon": None if TUNING_MODE else CHOSEN_EPSILON,
+                "results": results,
+            }, f, indent=2)
+
     results = []
 
     if TUNING_MODE:
@@ -451,6 +468,7 @@ def main(cfg):
                 robustness_sink=robustness_samples,
             )
             results.append(entry)
+            _write_progress(results)
             _log_robustness_debug(label, _robustness_percentiles(robustness_samples))
 
         # Phase 2: sweep -- pick epsilon* from these once real numbers are in.
@@ -462,6 +480,9 @@ def main(cfg):
                 SEQUENCE_SEED_BASE,
             )
             results.append(entry)
+            _write_progress(results)
+            _log(f"  [progress] wrote {len(results)}/{len(EPSILONS_TO_SWEEP) + int(RUN_DIAGNOSTIC)} "
+                 f"entry(ies) so far to: {results_path}")
     else:
         # Phase 3: final -- CHOSEN_EPSILON, held-out cohort, once.
         shield = ArmSTLMonitorShield(obstacles=[], epsilon=CHOSEN_EPSILON)
@@ -471,18 +492,8 @@ def main(cfg):
             cfg, SEQUENCE_SEED_BASE,
         )
         results.append(entry)
+        _write_progress(results)
 
-    results_path = RUN_OUTPUT_DIR / "results.json"
-    with open(results_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "tuning_mode": TUNING_MODE,
-            "cohort_sequence_idx_range": [COHORT_OFFSET, COHORT_OFFSET + N],
-            "n_candidates": N_CANDIDATES,
-            "obstacle_radius": OBSTACLE_RADIUS,
-            "epsilons_to_sweep": EPSILONS_TO_SWEEP if TUNING_MODE else None,
-            "chosen_epsilon": None if TUNING_MODE else CHOSEN_EPSILON,
-            "results": results,
-        }, f, indent=2)
     _log(f"[run] wrote structured results to: {results_path}")
     _log(f"[run] DONE -- zip up {RUN_OUTPUT_DIR} and send it back for tuning analysis")
     _LOG_FILE.close()

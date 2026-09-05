@@ -450,6 +450,25 @@ def main(cfg):
     eval_sequences = get_sequences(2 * N)[COHORT_OFFSET:COHORT_OFFSET + N]
     SEQUENCE_SEED_BASE = 1000 + COHORT_OFFSET
 
+    results_path = RUN_OUTPUT_DIR / "results.json"
+
+    def _write_progress(results):
+        # Re-written after EVERY sweep entry (diagnostic + each threshold),
+        # not just once at the end -- a tuning sweep is slow enough (each
+        # entry = a full cohort rollout) that losing everything to a
+        # crash/interrupt partway through, or having to wait for the whole
+        # sweep before seeing any number, is real pain.
+        with open(results_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "tuning_mode": TUNING_MODE,
+                "cohort_sequence_idx_range": [COHORT_OFFSET, COHORT_OFFSET + N],
+                "n_candidates": N_CANDIDATES,
+                "obstacle_radius": OBSTACLE_RADIUS,
+                "thresholds_to_sweep": THRESHOLDS_TO_SWEEP if TUNING_MODE else None,
+                "chosen_threshold": None if TUNING_MODE else CHOSEN_THRESHOLD,
+                "results": results,
+            }, f, indent=2)
+
     results = []
 
     if TUNING_MODE:
@@ -476,6 +495,7 @@ def main(cfg):
                 disagreement_sink=disagreement_samples,
             )
             results.append(entry)
+            _write_progress(results)
             _log_disagreement_debug(label, _disagreement_percentiles(disagreement_samples))
 
         # Phase 2: sweep -- pick tau* from these once real numbers are in.
@@ -487,6 +507,9 @@ def main(cfg):
                 SEQUENCE_SEED_BASE,
             )
             results.append(entry)
+            _write_progress(results)
+            _log(f"  [progress] wrote {len(results)}/{len(THRESHOLDS_TO_SWEEP) + int(RUN_DIAGNOSTIC)} "
+                 f"entry(ies) so far to: {results_path}")
     else:
         # Phase 3: final -- CHOSEN_THRESHOLD, held-out cohort, once.
         shield = ArmConfThreshShield(disagreement_threshold=CHOSEN_THRESHOLD, replan_steps=REPLAN_STEPS)
@@ -496,18 +519,8 @@ def main(cfg):
             cfg, SEQUENCE_SEED_BASE,
         )
         results.append(entry)
+        _write_progress(results)
 
-    results_path = RUN_OUTPUT_DIR / "results.json"
-    with open(results_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "tuning_mode": TUNING_MODE,
-            "cohort_sequence_idx_range": [COHORT_OFFSET, COHORT_OFFSET + N],
-            "n_candidates": N_CANDIDATES,
-            "obstacle_radius": OBSTACLE_RADIUS,
-            "thresholds_to_sweep": THRESHOLDS_TO_SWEEP if TUNING_MODE else None,
-            "chosen_threshold": None if TUNING_MODE else CHOSEN_THRESHOLD,
-            "results": results,
-        }, f, indent=2)
     _log(f"[run] wrote structured results to: {results_path}")
     _log(f"[run] DONE -- zip up {RUN_OUTPUT_DIR} and send it back for tuning analysis")
     _LOG_FILE.close()

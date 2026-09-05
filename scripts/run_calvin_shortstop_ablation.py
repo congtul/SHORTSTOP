@@ -216,7 +216,32 @@ def main(cfg):
 
     eval_sequences, sequence_seed_base, cohort_offset, N = cohort_sequences(cfg, TUNING_MODE)
 
+    results_path = run_output_dir / "results.json"
+
+    def _write_progress(results):
+        # Re-written after EVERY (stage, params) config, not just once at
+        # the end -- see run_calvin_mpc_filter.py's identical helper for
+        # why. Especially valuable here: 3 stages x their own sweep sizes
+        # can be a long run, and a later stage's crash shouldn't cost the
+        # earlier stages' already-finished results.
+        write_results_json(results_path, {
+            "tuning_mode": TUNING_MODE,
+            "cohort_sequence_idx_range": [cohort_offset, cohort_offset + N],
+            "n_candidates": N_CANDIDATES,
+            "obstacle_radius": OBSTACLE_RADIUS,
+            "model_error": MODEL_ERROR,
+            "stages": {
+                name: {"chosen_params": spec["chosen_params"], "params_to_sweep": spec["params_to_sweep"]}
+                for name, spec in STAGES.items()
+            },
+            "results": results,
+        })
+
     results = []
+    total_configs = sum(
+        len(spec["params_to_sweep"]) if TUNING_MODE and spec["params_to_sweep"] is not None else 1
+        for spec in STAGES.values()
+    )
     for stage_name, spec in STAGES.items():
         if TUNING_MODE and spec["params_to_sweep"] is not None:
             configs = spec["params_to_sweep"]
@@ -234,20 +259,10 @@ def main(cfg):
                 sequence_seed_base,
             )
             results.append(entry)
+            _write_progress(results)
+            log(f"  [progress] wrote {len(results)}/{total_configs} config(s) so far to: {results_path}")
 
-    write_results_json(run_output_dir / "results.json", {
-        "tuning_mode": TUNING_MODE,
-        "cohort_sequence_idx_range": [cohort_offset, cohort_offset + N],
-        "n_candidates": N_CANDIDATES,
-        "obstacle_radius": OBSTACLE_RADIUS,
-        "model_error": MODEL_ERROR,
-        "stages": {
-            name: {"chosen_params": spec["chosen_params"], "params_to_sweep": spec["params_to_sweep"]}
-            for name, spec in STAGES.items()
-        },
-        "results": results,
-    })
-    log(f"[run] wrote structured results to: {run_output_dir / 'results.json'}")
+    log(f"[run] wrote structured results to: {results_path}")
     log(f"[run] DONE -- zip up {run_output_dir} and send it back for tuning analysis")
     log.file.close()
 
