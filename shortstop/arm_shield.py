@@ -503,6 +503,214 @@ class ArmMPCFilterShield(ArmReachOnlyShield):
         constraints.append(n @ (corrected_point - obstacle.center) >= radius)
 
 
+class ArmCBFShield(ArmReachOnlyShield):
+    """CALVIN/arm analogue of shortstop.baselines.CBFShield -- a control-
+    barrier-function QP (Ames et al., refs [37]-[39]). Contrasted with
+    ArmMPCFilterShield exactly the way baselines.CBFShield's own
+    docstring contrasts it with baselines.MPCFilterShield (paper's Sec.
+    III-D: "Control barrier functions enforce forward invariance ... via
+    a pointwise QP"): CBF-QP is POINTWISE by construction -- one tiny QP
+    per real control step, constraining only the VERY NEXT action from
+    the CURRENT real state, never a multi-step lookahead the way MPC-
+    Filter's own H-step horizon is -- 1 step vs H steps of scope.
+
+    Barrier per primitive i (9 frames + 8 links, same 17-primitive scope
+    as every other arm shield's Certify step) and per obstacle:
+    `h_i(q) = signed_distance(primitive_i(q), obstacle)` -- the SAME
+    signed-distance margin arm_reach._signed_distance/calvin_experiment.
+    _clearance already use (Euclidean distance minus obstacle.radius
+    minus this primitive's own physical radius minus w_bar/model_error),
+    NOT baselines.CBFShield's squared-distance form -- squared-distance
+    is only exact/convenient there because the 2D obstacle is a circle
+    and its dynamics are exactly x_next=x+a*dt; the arm's chain is
+    neither, so this reuses the SAME margin convention (and its already-
+    linearized tangent-plane gradient, see ArmMPCFilterShield's own
+    `_add_tangent_constraint`) every other arm shield's ground truth
+    already relies on, instead of inventing a second, inconsistent
+    barrier definition.
+
+    Discrete-time CBF condition (continuous ḣ + alpha*h >= 0,
+    discretized to match how this repo's "action" is already a per-step
+    Cartesian delta, not a continuous velocity -- same choice
+    ArmMPCFilterShield's own `dq_k` chain already makes):
+
+        n_i . dp_i  +  alpha * h_i(q_current)  >=  0
+
+    where `n_i` is the unit vector from the obstacle's center to
+    primitive i's CURRENT position (the same tangent-plane gradient
+    `_add_tangent_constraint` already computes) and `dp_i =
+    frame_jacobian_i(q_current) @ pinv(J_ee(q_current)) @ (a *
+    CALVIN_ACTION_SCALE)` is the first-order predicted Cartesian
+    displacement of primitive i for the ONE step being corrected, as a
+    function of the QP's decision variable `a` (the candidate action
+    itself, NOT a delta relative to some nominal reference -- unlike
+    ArmMPCFilterShield's own chained `dq_k`, there is no separately-known
+    nonlinear baseline to correct relative to here: q_current already IS
+    the one and only starting point). A SINGLE linearization at the
+    CURRENT state -- no per-step-in-a-horizon re-linearization the way
+    MPC-Filter's chain needs, since there is no horizon here at all.
+
+    Note on alpha=1.0 (NOT algebraically identical to ArmMPCFilterShield's
+    own k=1 constraint, despite both looking similar -- worth being
+    precise about, since an earlier draft of this docstring overclaimed
+    exact equivalence): at alpha=1.0, this condition demands `h_i(next)
+    >= 0` outright (full one-step recovery, same STRENGTH as a naive
+    one-step-lookahead filter) -- but this class evaluates the gradient/
+    Jacobian at the CURRENT state q_current (the textbook Ames et al.
+    formulation: `L_f h(x) + L_g h(x) u + alpha*h(x) >= 0`, everything at
+    x), whereas ArmMPCFilterShield's own k=1 step evaluates its point AND
+    Jacobian at q_nominal[1] (the NOMINAL NEXT state its own uncorrected
+    chunk would reach) -- a different, legitimate linearization choice
+    suited to ITS multi-step chain, not a "reference" this class should
+    match bit-for-bit. Confirmed empirically (tests/test_arm_shield.py's
+    own alpha test): at alpha=1.0 this class's correction drives
+    robustness_to_go to within a small linearization residual of 0
+    (matching the qualitative "full recovery" claim), not necessarily
+    the identical numeric correction ArmMPCFilterShield would have found
+    for the same scenario.
+
+    What `alpha` actually controls (docs/PARAMETERS_REFERENCE.md's own
+    "alpha (CBF-Shield gain)" entry): for alpha in (0, 1] and a currently-
+    safe primitive (`h_i(q_current) >= 0`), this constraint algebraically
+    GUARANTEES `h_i(next) >= (1-alpha)*h_i(q_current) >= 0` too (forward
+    invariance) -- alpha small forces h to barely decrease at all
+    (intervenes earlier, farther from the obstacle); alpha large permits
+    h to drop quickly before intervening (closer to the boundary, more
+    aggressive). If a primitive is ALREADY inside an obstacle
+    (`h_i(q_current) < 0` -- only reachable from an already-unsafe real
+    state, e.g. after a fallback), the CBF condition only slows further
+    intrusion -- unlike ArmRepairShield's own Repair step, it does NOT by
+    itself force recovery back to `h_i >= 0`.
+
+    JOINT_LIMITS are ALSO enforced as a direct linear constraint on the
+    same one-step `dq` (matching ArmMPCFilterShield's own reasoning: a
+    physical-validity bound every other arm shield already respects, so
+    CBF isn't unfairly advantaged by being allowed to violate it).
+
+    Corrects only `candidates[0][0]` (the single next action) -- rows
+    1..H-1 of the chunk stay exactly as the policy proposed them,
+    matching baselines.CBFShield's own "Corrects only the first action
+    ... rather than selecting among the K candidates" convention exactly.
+    `resolve()` re-solves this SAME tiny single-step QP from the REAL
+    current state after every executed row -- unlike ArmMPCFilterShield
+    (whose `resolve()` is what makes IT genuinely receding-horizon, since
+    its own `select()` already optimizes a whole horizon up front), this
+    class's `select()` and `resolve()` are the exact same single-step QP
+    call by construction: there IS no "remaining horizon" to re-plan here
+    at all, matching the literature's own framing of CBF-QP as a real-
+    time, per-control-cycle controller rather than a chunk-level planner.
+    `run_calvin_shielded_subtask` prefers `resolve` over `recertify` (see
+    that harness's own docstring) -- inherited `_admissible`/`recertify`
+    stay reachable but unused by this class."""
+
+    def __init__(self, obstacles, w_bar, model_error=0.02, alpha=1.0):
+        super().__init__(obstacles, w_bar, model_error)
+        self.alpha = alpha
+
+    def select(self, joint_angles, candidates, scores):
+        del scores  # CBF corrects candidates[0][0] directly, never ranks -- see class docstring
+        nominal_chunk = np.asarray(candidates[0], dtype=float).copy()
+        corrected_action = self._solve_qp(joint_angles, nominal_chunk[0, :3])
+
+        if corrected_action is None:
+            mask = [False] + [True] * (len(candidates) - 1)
+            return np.zeros_like(nominal_chunk), {
+                "fallback": True, "n_admissible": 0, "admissible_mask": mask,
+                "repair_attempted": True, "repair_succeeded": False,
+            }
+
+        chunk = nominal_chunk.copy()
+        chunk[0, :3] = corrected_action
+        intervened = not np.allclose(corrected_action, nominal_chunk[0, :3], atol=1e-6)
+        mask = [not intervened] + [True] * (len(candidates) - 1)
+        n_admissible = len(candidates) - (1 if intervened else 0)
+        return chunk, {
+            "fallback": False, "n_admissible": n_admissible, "admissible_mask": mask,
+            "intervened": intervened, "repair_attempted": intervened, "repair_succeeded": intervened,
+        }
+
+    def resolve(self, joint_angles, remaining_chunk):
+        """Re-solves the SAME single-step CBF-QP from the REAL current
+        state, correcting only `remaining_chunk[0]` -- rows 1: stay
+        exactly as previously proposed, unchanged. See class docstring
+        for why CBF has no "remaining horizon" to re-plan in the first
+        place (unlike ArmMPCFilterShield's own `resolve()`, which
+        re-corrects the whole remaining tail)."""
+        remaining_chunk = np.asarray(remaining_chunk, dtype=float)
+        corrected_action = self._solve_qp(joint_angles, remaining_chunk[0, :3])
+        if corrected_action is None:
+            return None
+        resolved = remaining_chunk.copy()
+        resolved[0, :3] = corrected_action
+        return resolved
+
+    def _solve_qp(self, joint_angles, nominal_action):
+        """Shared single-step QP core for both select() (nominal =
+        candidates[0]'s own first row) and resolve() (nominal =
+        remaining_chunk's own first row, re-linearized from a NEW real
+        state) -- see each caller's own docstring for what differs.
+        `nominal_action`: (3,) task-space position delta for the ONE step
+        being corrected. Returns the corrected (3,) action, or `None` if
+        infeasible."""
+        joint_angles = np.asarray(joint_angles, dtype=float)
+        nominal_action = np.asarray(nominal_action, dtype=float)
+
+        ee_pinv = np.linalg.pinv(end_effector_jacobian(joint_angles))
+        frame_points = panda_frames(joint_angles)  # (9, 3) -- CURRENT state, no lookahead
+        frame_jacobians = [numerical_jacobian(joint_angles, i) for i in range(len(frame_points))]
+
+        a = cp.Variable(3)
+        # dq is the FULL one-step joint delta predicted for CANDIDATE
+        # action `a` itself (not a delta relative to `nominal_action`) --
+        # unlike ArmMPCFilterShield's own chained dq_k (which legitimately
+        # decomposes into "already-known nonlinear baseline + linear
+        # correction" because it walks a multi-step horizon), CBF has only
+        # ONE step and no separately-precomputed baseline to correct
+        # relative to: q_current IS the starting point, full stop. Using
+        # `a - nominal_action` here (an earlier version's bug, caught by
+        # tests/test_arm_shield.py's own joint-limit test) would silently
+        # evaluate the joint-limits/CBF constraints at "q_current + 0" for
+        # a=nominal_action instead of at the TRUE next state
+        # `_step_joint_config` would actually reach, making the QP think
+        # an obviously joint-limit-violating nominal action was already
+        # fine. CALVIN_ACTION_SCALE: see ArmMPCFilterShield._solve_qp's
+        # identical comment -- this hand-rolled sensitivity chain doesn't
+        # call _step_joint_config itself, so it must apply the scale
+        # explicitly.
+        dq = ee_pinv @ (a * CALVIN_ACTION_SCALE)
+
+        constraints = [
+            joint_angles + dq >= JOINT_LIMITS[:, 0],
+            joint_angles + dq <= JOINT_LIMITS[:, 1],
+        ]
+        for obstacle in self.obstacles:
+            for i, point in enumerate(frame_points):
+                self._add_cbf_constraint(constraints, point, frame_jacobians[i], dq, obstacle, FRAME_RADIUS[i])
+            for i in range(len(LINK_RADIUS)):
+                point_a, point_b = frame_points[i], frame_points[i + 1]
+                t = _closest_point_t(obstacle.center, point_a, point_b)
+                link_point = point_a + t * (point_b - point_a)
+                link_jacobian = (1.0 - t) * frame_jacobians[i] + t * frame_jacobians[i + 1]
+                self._add_cbf_constraint(constraints, link_point, link_jacobian, dq, obstacle, LINK_RADIUS[i])
+
+        problem = cp.Problem(cp.Minimize(cp.sum_squares(a - nominal_action)), constraints)
+        try:
+            problem.solve()
+        except cp.error.SolverError:
+            a.value = None
+
+        return None if a.value is None else np.asarray(a.value)
+
+    def _add_cbf_constraint(self, constraints, current_point, jacobian, dq, obstacle, physical_radius):
+        direction = current_point - obstacle.center
+        norm = np.linalg.norm(direction)
+        n = direction / norm if norm > 1e-9 else np.array([0.0, 0.0, 1.0])
+        margin = obstacle.radius + physical_radius + self.w_bar + self.model_error
+        h_current = float(norm - margin)
+        dp = jacobian @ dq
+        constraints.append(n @ dp + self.alpha * h_current >= 0)
+
+
 class ArmConfThreshShield:
     """CALVIN/LIBERO-analogue of shortstop.baselines.ConfThreshShield --
     rejects candidates whose predicted flange endpoint disagrees too much
