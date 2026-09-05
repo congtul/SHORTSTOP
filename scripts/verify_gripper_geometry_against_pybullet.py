@@ -81,10 +81,10 @@ from mdt.evaluation.utils import get_default_beso_and_env, get_env_state_for_ini
 from mdt.utils.utils import get_last_checkpoint  # noqa: E402
 
 from shortstop.calvin_experiment import (  # noqa: E402
-    _gripper_width_from_obs, _joint_angles_from_obs, _lang_goal, _to_action_tensor,
+    _base_transform_from_env, _gripper_width_from_obs, _joint_angles_from_obs, _lang_goal, _to_action_tensor,
 )
 from shortstop.mdt_policy_client import ForwardOnlyPolicy  # noqa: E402
-from shortstop.robot_geometry import finger_tip_capsules, gripper_tip_position  # noqa: E402
+from shortstop.robot_geometry import finger_tip_capsules, gripper_tip_position, to_world_frame  # noqa: E402
 
 N_CANDIDATES = 8
 REPLAN_STEPS = 10
@@ -180,11 +180,23 @@ def main(cfg):
                 gripper_width = _gripper_width_from_obs(obs)
                 widths_seen.append(gripper_width)
 
-                (left_a, _), (right_a, _) = finger_tip_capsules(joint_angles, gripper_width)
+                # finger_tip_capsules()/gripper_tip_position() are LOCAL-
+                # frame (see robot_geometry.py's module docstring), but
+                # getLinkState reports true WORLD coordinates -- same bug
+                # class already found+fixed for g(a) (calvin_progress.py)
+                # and the DH verify script; must transform before diffing
+                # or the real (nonzero) robot_base_position dominates every
+                # number here.
+                base_position, base_orientation = _base_transform_from_env(env)
+
+                (left_a_local, _), (right_a_local, _) = finger_tip_capsules(joint_angles, gripper_width)
+                left_a = to_world_frame(left_a_local, base_position, base_orientation)
+                right_a = to_world_frame(right_a_local, base_position, base_orientation)
                 left_errors.append(float(np.linalg.norm(left_a - _real_link_frame_position(p, cid, robot_uid, left_link))))
                 right_errors.append(float(np.linalg.norm(right_a - _real_link_frame_position(p, cid, robot_uid, right_link))))
 
-                centerline = gripper_tip_position(joint_angles)
+                centerline_local = gripper_tip_position(joint_angles)
+                centerline = to_world_frame(centerline_local, base_position, base_orientation)
                 centerline_errors.append(float(np.linalg.norm(centerline - _real_link_frame_position(p, cid, robot_uid, tcp_link))))
 
                 if steps_done >= STEPS_PER_SUBTASK:
