@@ -69,9 +69,11 @@ from mdt.evaluation.multistep_sequences import get_sequences  # noqa: E402
 from mdt.evaluation.utils import get_default_beso_and_env, get_env_state_for_initial_condition  # noqa: E402
 from mdt.utils.utils import get_last_checkpoint  # noqa: E402
 
-from shortstop.calvin_experiment import _joint_angles_from_obs, _lang_goal, _to_action_tensor  # noqa: E402
+from shortstop.calvin_experiment import (  # noqa: E402
+    _base_transform_from_env, _joint_angles_from_obs, _lang_goal, _to_action_tensor,
+)
 from shortstop.mdt_policy_client import ForwardOnlyPolicy  # noqa: E402
-from shortstop.robot_geometry import N_JOINTS, panda_frames  # noqa: E402
+from shortstop.robot_geometry import N_JOINTS, panda_frames, to_world_frame  # noqa: E402
 
 N_CANDIDATES = 8
 REPLAN_STEPS = 10
@@ -144,7 +146,24 @@ def main(cfg):
                 for action_row in chunk[:REPLAN_STEPS]:
                     obs, _, _, _ = env.step(_to_action_tensor(action_row))
                     joint_angles = _joint_angles_from_obs(obs)
-                    ours = panda_frames(joint_angles)
+                    # panda_frames() is expressed in the robot's own LOCAL
+                    # base frame (see robot_geometry.py's module docstring
+                    # -- _panda_transforms starts at T=eye(4), no base
+                    # offset folded in), but PyBullet's getLinkState/
+                    # getBasePositionAndOrientation report true WORLD
+                    # coordinates, and the real CALVIN scenes do NOT put
+                    # the robot base at the world origin (same base-frame
+                    # bug fixed for g(a) in calvin_progress.py, 2026-09-05
+                    # -- see docs/PARAMETERS_REFERENCE.md). Transform our
+                    # own local-frame prediction into world coordinates
+                    # before diffing, or every frame's "discrepancy" is
+                    # dominated by this constant offset, not any real DH
+                    # error.
+                    base_position, base_orientation = _base_transform_from_env(env)
+                    ours_local = panda_frames(joint_angles)
+                    ours = np.stack([
+                        to_world_frame(point, base_position, base_orientation) for point in ours_local
+                    ])
                     real = _pybullet_frames(env, joint_angles)
                     for i in range(N_JOINTS + 2):
                         per_frame_errors[i].append(float(np.linalg.norm(ours[i] - real[i])))
