@@ -126,28 +126,54 @@ REPLAN_STEPS = 10
 # while tuning; no config knob for it yet since we're still narrowing the
 # range by hand, see module docstring.
 #
-# TUNED (real run, n_sequences=100, REPLAN_STEPS=10, checkpoint/dataset per
-# docs/CALVIN_SETUP.md): swept [0.02, 0.05, 0.08, 0.12] -> violation_rate
-# 0.076/0.108/0.128/0.148, success_rate 0.704/0.586/0.482/0.412 (baseline
-# without obstacle: 0.930). No floor effect at 0.02 (violation_rate
-# already meaningfully nonzero), no ceiling effect reached by 0.12
-# (nowhere near 100%) -- full table + the min_clearance+radius=const
-# sanity-check finding in docs/PARAMETERS_REFERENCE.md muc 1's "radius"
-# entry. CHOSE r=0.08 as the default (shortstop.calvin_obstacle.
-# sample_obstacle_from_reference_chunk's own default arg) -- balances a
-# meaningful violation_rate against still leaving success_rate well
-# above 0 for a shield to visibly improve. Re-sweep (edit this list) if
-# the checkpoint/dataset or REPLAN_STEPS ever change again.
-RADII_TO_SWEEP = [0.08]
+# STALE (2026-09-05) -- the [0.02, 0.05, 0.08, 0.12] -> r=0.08 sweep below
+# was invalidated by TWO independent, since-fixed bugs: (1) CALVIN_ACTION_
+# SCALE (see arm_reach.py) -- sample_obstacle_from_reference_chunk's own
+# propagate_arm_tube call placed the obstacle ~50x farther along the
+# chunk's direction than the arm's real per-window reach, so every radius
+# below was tested against an unrealistically-distant placement, not the
+# "obstacle at this window's real destination" the design intends; (2)
+# GRIPPER_TIP_OFFSET (see robot_geometry.py) -- the ground-truth capsule
+# check near the gripper used a primitive radius 0.04m too small, so
+# violation_rate below under-counted collisions in the outer 4cm of the
+# fingertip's real reach. Both changed the actual difficulty at any given
+# radius value, in an a-priori unclear direction (placement is now much
+# closer/more "real", the gripper-region primitive is now bigger) --
+# re-sweep from scratch, don't just re-run r=0.08.
+#
+# NEW SWEEP (2026-09-05, pending a real run): widened AND shifted down
+# from the old range, since GRIPPER_TIP_OFFSET's fix alone means even
+# radius=0 now carries a real ~0.20m margin near the gripper
+# (GRIPPER_TIP_OFFSET+GRIPPER_TIP_RADIUS = 0.14+0.06) where the old sweep
+# had 0.16 -- worth re-checking for a floor/ceiling effect at both ends
+# rather than assuming last time's "no floor at 0.02, no ceiling at 0.12"
+# still holds now that placement is realistic instead of ~50x overshot.
+# Includes 0.0 (a point obstacle) as a new baseline to isolate how much
+# violation_rate the arm's own capsule geometry alone now produces.
+# cfg.debug's steps_taken diagnostic (_violated_steps_taken_percentiles,
+# added after the LAST real sweep and never yet checked against real
+# numbers) is worth reading closely this run -- it directly answers "does
+# the arm get a real chance to move before this obstacle is hit", the
+# exact concern that motivated re-checking this list at all.
+RADII_TO_SWEEP = [0.0, 0.02, 0.04, 0.08, 0.12, 0.16]
 
-# Resuming a killed/interrupted run: trim RADII_TO_SWEEP above to just the
-# radii not yet completed (check the previous run's run.log), and flip
-# this to False so this run doesn't redo "without obstacle" too (its own
-# result never depends on which radii are being swept, so a previous
-# run's logged number for it is still valid -- no need to ever re-run
-# it just because the radius list changed). Set back to True for a full
-# from-scratch run.
-INCLUDE_WITHOUT_OBSTACLE = True
+# OFF for this re-sweep (2026-09-05): confirmed neither the action-scale
+# nor the GRIPPER_TIP_OFFSET bug can touch the "without obstacle" number
+# at all -- _clearance(obs, obstacle) returns None immediately when
+# obstacle is None (calvin_experiment.py), before touching any of the
+# geometry either bug lives in, so `violated`/`min_clearance` never get
+# computed and success_rate depends only on real env.step()/task_oracle,
+# neither of which we ever modified. The last real run's number (tuning
+# cohort: success_rate=0.930, avg_seq_len=4.65/5, n=100 -- see
+# RADII_TO_SWEEP's own comment above) is still fully valid; no need to
+# burn compute re-running it just because the radius list changed.
+#
+# General rule (also applies when resuming a killed/interrupted sweep):
+# trim RADII_TO_SWEEP above to just the radii not yet completed (check
+# the previous run's run.log) and leave this False -- "without obstacle"
+# never depends on which radii are being swept. Set back to True only
+# for a genuine from-scratch run (new checkpoint/dataset/REPLAN_STEPS).
+INCLUDE_WITHOUT_OBSTACLE = False
 
 _COHORT_TAG = "tuning" if TUNING_MODE else "eval"
 RUN_OUTPUT_DIR = REPO_ROOT / "outputs" / "calvin_unshielded_runs" / f"run_{datetime.now():%Y%m%d_%H%M%S}_{_COHORT_TAG}"
@@ -361,6 +387,21 @@ def main(cfg):
         for r in RADII_TO_SWEEP
     ]
 
+    results_path = RUN_OUTPUT_DIR / "results.json"
+
+    def _write_progress(results):
+        # Re-written after EVERY radius/obstacle-config entry, not just
+        # once at the end -- see scripts/run_calvin_shielded.py's
+        # identical helper for why (a radius sweep is exactly this kind
+        # of slow, multi-entry run).
+        with open(results_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "tuning_mode": TUNING_MODE,
+                "cohort_sequence_idx_range": [COHORT_OFFSET, COHORT_OFFSET + N],
+                "radii_to_sweep": RADII_TO_SWEEP,
+                "results": results,
+            }, f, indent=2)
+
     results = []
     total_videos_saved = 0
     for label, obstacle_fn, radius in labels_and_obstacle_fns:
@@ -423,18 +464,12 @@ def main(cfg):
                     entry["video_paths"] = video_paths
 
         results.append(entry)
+        _write_progress(results)
+        _log(f"  [progress] wrote {len(results)}/{len(labels_and_obstacle_fns)} entry(ies) so far to: {results_path}")
 
     if cfg.debug and total_videos_saved > 0:
         _log(f"[debug] saved {total_videos_saved} obstacle-visualization video(s) under: {VIS_OUTPUT_DIR}")
 
-    results_path = RUN_OUTPUT_DIR / "results.json"
-    with open(results_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "tuning_mode": TUNING_MODE,
-            "cohort_sequence_idx_range": [COHORT_OFFSET, COHORT_OFFSET + N],
-            "radii_to_sweep": RADII_TO_SWEEP,
-            "results": results,
-        }, f, indent=2)
     _log(f"[run] wrote structured results to: {results_path}")
     _log(f"[run] DONE -- zip up {RUN_OUTPUT_DIR} and send it back for tuning analysis")
     _LOG_FILE.close()

@@ -145,8 +145,12 @@ LINK_RADIUS = [0.13, 0.11, 0.10, 0.09, 0.09, 0.10, 0.11, 0.06]
 # exactly: the verify run's centerline-far-point check showed a constant
 # (zero-variance) 0.04000m bias = 0.14 - 0.10, while the near-point check
 # (FINGER_JOINT_Z_OFFSET, unaffected by this) was near-exact (mean
-# 0.0002m). Re-run the verify script after this fix to confirm ~0
-# discrepancy. This constant feeds gripper_tip_position(), finger_tip_
+# 0.0002m).
+#
+# CONFIRMED 2026-09-05 (real re-run after this fix): centerline far-point
+# discrepancy is now EXACTLY 0.00000m (mean=max=0.00000, n=1000) -- the
+# constant 0.04000m bias is gone, near-point unchanged (mean=0.0002m,
+# max=0.00813m). This constant feeds gripper_tip_position(), finger_tip_
 # capsules()'s far point, AND FRAME_RADIUS[8] (below) -- and, via
 # calvin_experiment._clearance/_candidate_clearance, the GROUND-TRUTH
 # collision check every already-run baseline's violation_rate/

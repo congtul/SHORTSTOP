@@ -273,6 +273,11 @@ với `panda_longer_finger.yaml`'s override (`gripper_joint_ids=[9,11]`,
 `GRIPPER_TIP_OFFSET: 0.1 -> 0.14` trong `robot_geometry.py` (chi tiết đầy
 đủ trong comment ngay trên hằng số).
 
+**✅ Xác nhận sau fix (real re-run, 2026-09-05)**: centerline far-point
+discrepancy giờ **đúng 0.00000m** (mean=max=0.00000, n=1000) — bias
+constant 0.04000m đã biến mất hoàn toàn, near-point không đổi (mean=
+0.0002m, max=0.00813m). Fix đã đóng đúng, không còn gì lệch.
+
 **Hệ quả cần lưu ý**: hằng số này feed vào `gripper_tip_position()`,
 `finger_tip_capsules()`'s far point, VÀ `FRAME_RADIUS[8]` — qua
 `calvin_experiment._clearance`/`_candidate_clearance`, đây chính là
